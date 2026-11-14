@@ -1,0 +1,45 @@
+{
+  "name": "dsh-attune-memory",
+  "version": "0.1.0",
+  "description": "Long-term memory for DeepSeek Harness: a SQLite user model maintained through an out-of-process engine.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/engine.js",
+    "lib/recall.js",
+    "lib/extract.js",
+    "lib/tools.js",
+    "lib/routes.js",
+    "lib/ui.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "memory"
+  ],
+  "license": "MIT"
+}

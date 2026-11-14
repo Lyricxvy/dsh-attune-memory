@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="660" viewBox="0 0 1120 660" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6472"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f6fb3"/>
+    </marker>
+  </defs>
+
+  <rect width="1120" height="660" fill="#fbfbfd"/>
+
+  <text x="28" y="38" font-size="21" font-weight="700" fill="#1f2937">dsh-memory 记忆系统总体结构</text>
+  <text x="28" y="60" font-size="12.5" fill="#6b7280">写入决定「记不记、记成什么」，存储只有一份真相，读取决定「进不进上下文、进哪一层」</text>
+
+  <!-- ============ 写入侧 ============ -->
+  <g>
+    <rect x="24" y="80" width="336" height="392" rx="12" fill="#f2f6fc" stroke="#c8d8ee"/>
+    <text x="40" y="106" font-size="15" font-weight="700" fill="#2f6fb3">① 写入侧 Write</text>
+
+    <rect x="40" y="120" width="304" height="44" rx="8" fill="#ffffff" stroke="#b9cde6"/>
+    <text x="56" y="147" font-size="13" fill="#111827">真人消息 / 模型工具调用</text>
+
+    <rect x="40" y="182" width="304" height="58" rx="8" fill="#ffffff" stroke="#b9cde6"/>
+    <text x="56" y="205" font-size="13" fill="#111827">候选 Candidate</text>
+    <text x="56" y="225" font-size="11.5" fill="#6b7280">content · type · subject · scope · confidence</text>
+
+    <rect x="40" y="258" width="304" height="74" rx="8" fill="#ffffff" stroke="#b9cde6"/>
+    <text x="56" y="281" font-size="13" fill="#111827">价值闸门 · 主体识别 · 相似判定</text>
+    <text x="56" y="301" font-size="11.5" fill="#6b7280">时效/任务/疑问/指代 → IGNORE</text>
+    <text x="56" y="319" font-size="11.5" fill="#6b7280">第三方主体 → 拒绝并回告怎么改</text>
+
+    <rect x="40" y="350" width="304" height="74" rx="8" fill="#ffffff" stroke="#b9cde6"/>
+    <text x="56" y="373" font-size="13" fill="#111827">决策</text>
+    <text x="56" y="393" font-size="11" fill="#6b7280">自动：ADD / TOUCH / SUPERSEDE / IGNORE</text>
+    <text x="56" y="411" font-size="11" fill="#6b7280">显式：UPDATE / MERGE / FORGET / ARCHIVE</text>
+
+    <rect x="40" y="440" width="304" height="22" rx="6" fill="#e8f0fb" stroke="#c8d8ee"/>
+    <text x="56" y="456" font-size="11.5" fill="#2f6fb3">单事务提交：先插新行，再回填旧行（外键）</text>
+  </g>
+
+  <!-- ============ 存储 ============ -->
+  <g>
+    <rect x="392" y="80" width="336" height="392" rx="12" fill="#f6f3fb" stroke="#d6cdea"/>
+    <text x="408" y="106" font-size="15" font-weight="700" fill="#6b4fa8">② 存储 Storage（只有一份真相）</text>
+
+    <rect x="408" y="120" width="304" height="96" rx="8" fill="#ffffff" stroke="#cfc3e6"/>
+    <text x="424" y="143" font-size="13" font-weight="600" fill="#111827">memories · 24 列</text>
+    <text x="424" y="164" font-size="11.5" fill="#6b7280">身份 / 分类 / 内容 / 信任 / 注入</text>
+    <text x="424" y="182" font-size="11.5" fill="#6b7280">生命周期 / 来源 / 记账</text>
+    <text x="424" y="203" font-size="11.5" fill="#8b5e34">valid_from·valid_until ＝现实时间</text>
+
+    <rect x="408" y="228" width="304" height="70" rx="8" fill="#ffffff" stroke="#cfc3e6"/>
+    <text x="424" y="251" font-size="13" font-weight="600" fill="#111827">memory_change · append-only</text>
+    <text x="424" y="272" font-size="11.5" fill="#6b7280">add/update/touch/supersede/merge/…</text>
+    <text x="424" y="290" font-size="11.5" fill="#6b7280">old_snapshot · new_snapshot · actor</text>
+
+    <rect x="408" y="310" width="304" height="54" rx="8" fill="#ffffff" stroke="#cfc3e6"/>
+    <text x="424" y="333" font-size="13" font-weight="600" fill="#111827">memory_meta</text>
+    <text x="424" y="353" font-size="11.5" fill="#6b7280">schema_version · last_maintenance_at</text>
+
+    <rect x="408" y="376" width="304" height="86" rx="8" fill="#ffffff" stroke="#cfc3e6"/>
+    <text x="424" y="399" font-size="13" font-weight="600" fill="#111827">8 条索引（按检索路径设计）</text>
+    <text x="424" y="420" font-size="11.5" fill="#6b7280">policy · type+domain · scope · subject</text>
+    <text x="424" y="438" font-size="11.5" fill="#6b7280">valid · superseded · updated · change</text>
+    <text x="424" y="456" font-size="11.5" fill="#6b7280">SQLite · WAL · 外键 · busy_timeout 5s</text>
+  </g>
+
+  <!-- ============ 读取侧 ============ -->
+  <g>
+    <rect x="760" y="80" width="336" height="392" rx="12" fill="#f2faf5" stroke="#c3e2cf"/>
+    <text x="776" y="106" font-size="15" font-weight="700" fill="#2f7d4f">③ 读取侧 Read</text>
+
+    <rect x="776" y="120" width="304" height="44" rx="8" fill="#ffffff" stroke="#bcdcc8"/>
+    <text x="792" y="147" font-size="13" fill="#111827">结构化过滤 → 候选 ≤ 200 条</text>
+
+    <rect x="776" y="176" width="304" height="44" rx="8" fill="#ffffff" stroke="#bcdcc8"/>
+    <text x="792" y="203" font-size="13" fill="#111827">中文切分（停用字当切分点，不是噪声）</text>
+
+    <rect x="776" y="232" width="304" height="62" rx="8" fill="#ffffff" stroke="#bcdcc8"/>
+    <text x="792" y="255" font-size="13" fill="#111827">两路匹配 + 六因子打分</text>
+    <text x="792" y="275" font-size="11.5" fill="#6b7280">rel × conf × imp × fresh × ctx × penalty</text>
+
+    <rect x="776" y="306" width="304" height="56" rx="8" fill="#ffffff" stroke="#bcdcc8"/>
+    <text x="792" y="329" font-size="12" fill="#111827">命中闸门 rel×conf×ctx ≥ 0.15 → Top-K</text>
+    <text x="792" y="349" font-size="11" fill="#6b7280">闸门卡「是不是在说这件事」，不卡最终分</text>
+
+    <rect x="776" y="374" width="304" height="88" rx="8" fill="#ffffff" stroke="#bcdcc8"/>
+    <text x="792" y="397" font-size="13" font-weight="600" fill="#111827">三通道注入</text>
+    <text x="792" y="418" font-size="11.5" fill="#6b7280">S1 手册  · system prompt order 150</text>
+    <text x="792" y="436" font-size="11.5" fill="#6b7280">S2 稳定  · system prompt order 155</text>
+    <text x="792" y="454" font-size="11.5" fill="#6b7280">T  相关  · 注入到最后一条真人消息之前</text>
+  </g>
+
+  <!-- 列间箭头 -->
+  <line x1="360" y1="200" x2="388" y2="200" stroke="#5b6472" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="728" y1="200" x2="756" y2="200" stroke="#5b6472" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="362" y="190" font-size="10.5" fill="#6b7280">落库</text>
+  <text x="730" y="190" font-size="10.5" fill="#6b7280">检索</text>
+
+  <!-- 列内箭头 -->
+  <g stroke="#9aa4b2" stroke-width="1.6" marker-end="url(#arrow)">
+    <line x1="192" y1="164" x2="192" y2="180"/>
+    <line x1="192" y1="240" x2="192" y2="256"/>
+    <line x1="192" y1="332" x2="192" y2="348"/>
+    <line x1="560" y1="216" x2="560" y2="226"/>
+    <line x1="560" y1="298" x2="560" y2="308"/>
+    <line x1="560" y1="364" x2="560" y2="374"/>
+    <line x1="928" y1="164" x2="928" y2="174"/>
+    <line x1="928" y1="220" x2="928" y2="230"/>
+    <line x1="928" y1="294" x2="928" y2="304"/>
+    <line x1="928" y1="362" x2="928" y2="372"/>
+  </g>
+
+  <!-- 读取侧输出到模型 -->
+  <line x1="928" y1="462" x2="928" y2="486" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arrowAccent)" stroke-dasharray="5 4"/>
+  <text x="938" y="480" font-size="11.5" fill="#2f7d4f">→ 模型（每轮重新组装）</text>
+
+  <!-- ============ 生命周期 ============ -->
+  <g>
+    <rect x="24" y="492" width="1072" height="86" rx="12" fill="#fffdf5" stroke="#e8dcb8"/>
+    <text x="40" y="516" font-size="14" font-weight="700" fill="#8b5e34">④ 生命周期（只允许可逆的自动化）</text>
+
+    <rect x="40" y="528" width="150" height="34" rx="17" fill="#e8f5ec" stroke="#a9d3b8"/>
+    <text x="115" y="550" font-size="12.5" text-anchor="middle" fill="#2f7d4f">active</text>
+
+    <rect x="286" y="528" width="170" height="34" rx="17" fill="#f3eefb" stroke="#c9b8e6"/>
+    <text x="371" y="550" font-size="12.5" text-anchor="middle" fill="#6b4fa8">superseded</text>
+
+    <rect x="552" y="528" width="150" height="34" rx="17" fill="#eef1f6" stroke="#bcc4d2"/>
+    <text x="627" y="550" font-size="12.5" text-anchor="middle" fill="#5b6472">archived</text>
+
+    <rect x="798" y="528" width="150" height="34" rx="17" fill="#fdeeee" stroke="#e6b8b8"/>
+    <text x="873" y="550" font-size="12.5" text-anchor="middle" fill="#a34a4a">deleted</text>
+
+    <g stroke="#9aa4b2" stroke-width="1.6" marker-end="url(#arrow)">
+      <line x1="190" y1="545" x2="284" y2="545"/>
+      <line x1="456" y1="545" x2="550" y2="545"/>
+      <line x1="702" y1="545" x2="796" y2="545"/>
+    </g>
+    <text x="237" y="538" font-size="10.5" text-anchor="middle" fill="#6b7280">事实变了</text>
+    <text x="503" y="538" font-size="10.5" text-anchor="middle" fill="#6b7280">tick 180 天</text>
+    <text x="749" y="538" font-size="10.5" text-anchor="middle" fill="#6b7280">用户要求忘掉</text>
+
+    <text x="960" y="550" font-size="11" fill="#8b5e34">purge：仅 deleted，物理删</text>
+  </g>
+
+  <!-- 底部注记 -->
+  <text x="28" y="604" font-size="11.5" fill="#6b7280">约束 A：库里只有 memories / memory_change / memory_meta 三张表，「用户画像」是查询期视图，不落副本。</text>
+  <text x="28" y="624" font-size="11.5" fill="#6b7280">约束 B：importance 只参与排序，injection_policy 只决定走哪条通道 —— 两者互不影响。</text>
+  <text x="28" y="644" font-size="11.5" fill="#6b7280">压缩：S1/S2 在 system prompt 里，不受任何压缩器影响；T 通道靠 compaction/end 事件重建，失败一律 fail-open。</text>
+</svg>

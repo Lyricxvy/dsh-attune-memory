@@ -1,0 +1,8 @@
+# engineDir 改成你 clone 下来的 engine 目录的绝对路径
+# Bundle patch layer: 一行就够 —— 宿主半边就是这个包的主入口（普通 Cordis 插件）。
+# config 里的路径用正斜杠；中文路径必须加引号，否则 YAML 会把冒号当分隔符。
+- insert:
+    - id: dsh-attune-memory
+      name: dsh-attune-memory
+      config:
+        engineDir: "D:/path/to/dsh-attune-memory/engine"

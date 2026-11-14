@@ -1,0 +1,58 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  engine:
+    name: 引擎测试与评估
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 单元测试
+        working-directory: engine
+        run: python -m unittest discover -s tests -v
+
+      - name: 评估场景 A–E
+        working-directory: engine
+        run: python -m eval.run_eval
+
+  plugin:
+    name: 插件测试（注入、RPC、面板、路由）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 注入与去重（12 组）
+        run: node plugin/dsh-attune-memory/test/recall.test.mjs
+
+      - name: RPC 客户端（3 组）
+        run: node plugin/dsh-attune-memory/test/engine.test.mjs
+
+      - name: 确定性抽取（句式边界）
+        run: node plugin/dsh-attune-memory/test/extract.test.mjs
+
+      - name: 面板渲染（2 组）
+        run: node plugin/dsh-attune-memory/test/panel.test.mjs
+
+      - name: 路由契约（假 ctx + 真引擎）
+        run: node plugin/dsh-attune-memory/test/routes.test.mjs
+
+      - name: 路由桩（不启引擎）
+        run: node plugin/dsh-attune-memory/test/routes.stub.test.mjs
