@@ -454,7 +454,7 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 - 正面：`search()` 语义不变，模型侧的检索仍然可解释、可复现。
 - 负面：领域识别错会把不该出现的约定带进来——所以只认"明确识别出的 domain"，且置信度 ≥0.8。
 - 负面：`context_block` 多一次按域查询（<2ms，索引 `idx_mem_type_domain` 命中）。
-- 影响：`MEMORY_READ_PIPELINE.md` §3；`MEMORY_V1_1_TUNING.md` 第 4、5 条；`tests` 的 `TestDomainRules`。
+- 影响：`MEMORY_READ_PIPELINE.md` §3；`DEFECT_LOG.md` 第 4、5 条；`tests` 的 `TestDomainRules`。
 
 ---
 
@@ -478,7 +478,7 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 - 正面：可以记录"有明确终点的状态"，不必等到它真的结束时再改。
 - 正面：错误在写入时就炸，且报错说清哪个值不合法。
 - 负面：模型可能给一个"看起来合理但实际错误的"时间——这属于内容判断错误，写管线不负责猜，靠 `explain` 可查。
-- 影响：`MEMORY_SCHEMA_V1.md` §4；`MEMORY_V1_1_TUNING.md` 第 2 条；`rpc._SPEC`、`write.validate()`。
+- 影响：`MEMORY_SCHEMA_V1.md` §4；`DEFECT_LOG.md` 第 2 条；`rpc._SPEC`、`write.validate()`。
 
 ---
 
@@ -503,7 +503,7 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 - 正面：重要性只调排序，符合"importance 与 injection_policy 独立"（约束 B）。
 - 正面：过期条目仍能被检索到并带 `⚠` 说明，用户/模型可以自己判断，而不是被系统悄悄藏起来。
 - 负面：无关条目更容易擦线进入候选——由 Top-K 与预算裁剪兜住（`k_default=5`）。
-- 影响：`MEMORY_RETRIEVAL_V1.md` §3；`MEMORY_V1_1_TUNING.md` 第 3 条。
+- 影响：`MEMORY_RETRIEVAL_V1.md` §3；`DEFECT_LOG.md` 第 3 条。
 ---
 
 ## ADR-019 稳定事实放进 system prompt 的 section，不再借用 runtime-context 快照

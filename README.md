@@ -69,31 +69,12 @@ engine/                  Python 引擎（纯标准库，无第三方依赖）
   eval/                  5 个评估场景（A 不存垃圾 … E scope 隔离）
 plugin/dsh-attune-memory/  DSH 插件（Node ESM，无构建步骤）
   lib/                   engine(RPC 客户端) / recall(注入) / tools / extract / routes / ui / client（设置面板）
-docs/                    18 份设计与取证文档
+docs/                    19 份设计与取证文档，索引见 docs/README.md
 ```
 
-## 文档索引
+## 文档
 
-| 文档 | 讲什么 |
-| --- | --- |
-| [MEMORY_SYSTEM_DESIGN_PRINCIPLES](docs/MEMORY_SYSTEM_DESIGN_PRINCIPLES.md) | 五条哲学、四条硬约束、13 项明确不做的事 |
-| [ADR](docs/ADR.md) | 34 条架构决策，每条含被否决的备选方案与理由 |
-| [CURRENT_ENVIRONMENT_ANALYSIS](docs/CURRENT_ENVIRONMENT_ANALYSIS.md) | DSH 消息生命周期取证：注入点为什么只能在这里 |
-| [ADOPTION_DECISION_TABLE](docs/ADOPTION_DECISION_TABLE.md) | 36 项机制取舍（采用/改造/推迟/拒绝） |
-| [MEMORY_SCHEMA_V1](docs/MEMORY_SCHEMA_V1.md) | 24 字段主表、四类角色、主体防坍缩、8 条索引 |
-| [MEMORY_WRITE_PIPELINE](docs/MEMORY_WRITE_PIPELINE.md) | 写管线：价值闸门、槽位、九条决策表 |
-| [MEMORY_READ_PIPELINE](docs/MEMORY_READ_PIPELINE.md) | 三通道与预算：什么时候注入什么、超了先砍谁 |
-| [MEMORY_RETRIEVAL_V1](docs/MEMORY_RETRIEVAL_V1.md) | 检索：结构化过滤 + 词法匹配 + 六因子打分 |
-| [MEMORY_LIFECYCLE](docs/MEMORY_LIFECYCLE.md) | 状态机、合法转移、可解释性 |
-| [HOST_INTEGRATION](docs/HOST_INTEGRATION.md) | 接入实录：真实会话 seq 证据、压缩后三层恢复 |
-| [MEMORY_ADMIN](docs/MEMORY_ADMIN.md) | 管理页与 CLI：信任边界、不暴露裸 SQL 的四道闸 |
-| [MEMORY_EVAL_SUITE](docs/MEMORY_EVAL_SUITE.md) | 评估套件：A 不存垃圾 / B 不认错主体 / C 状态更新 / D 不污染 / E 作用域 |
-| [MEMORY_V1_1_TUNING](docs/MEMORY_V1_1_TUNING.md) | 11 个只有真跑才暴露的缺陷与修法 |
-| [MEMORY_PRINCIPLES_REPORT](docs/MEMORY_PRINCIPLES_REPORT.md) | 记忆原理长文：对象模型、写入/读取/检索/生命周期、宿主耦合与实测 |
-| [RELEASE_NOTES_v0.1.0](docs/RELEASE_NOTES_v0.1.0.md) | 0.1.0 发布说明：26 项审查收口、安全栅栏、写入与检索改进、升级与限制 |
-| [V1_1_UPDATE_REPORT](docs/V1_1_UPDATE_REPORT.md) | 内部阶段记录：九模块变更、schema v3、幂等与冲突分级 |
-| [V2_V3_RESERVED](docs/V2_V3_RESERVED.md) | 刻意推迟的东西，以及什么信号才该做 |
-| [UNKNOWN_LIST](docs/UNKNOWN_LIST.md) | 还不知道的、以及怎么绕行 |
+设计与判断都留了记录，放在 [docs/](docs/README.md)：先看[设计原则](docs/MEMORY_SYSTEM_DESIGN_PRINCIPLES.md)、[架构决策](docs/ADR.md)和[接入实录](docs/HOST_INTEGRATION.md)，其余按主题分在模型、宿主、质量、边界四组。
 
 ## 验证状态
 

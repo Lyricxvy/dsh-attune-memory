@@ -1027,4 +1027,4 @@ python -m attune_memory.memctl --db <path> explain <id>
 cd engine; python tests/verify_delivery.py
 ```
 
-配套文档：`MEMORY_SYSTEM_DESIGN_PRINCIPLES.md`（哲学与边界）、`MEMORY_SCHEMA_V1.md`（字段定义）、`MEMORY_WRITE_PIPELINE.md`、`MEMORY_READ_PIPELINE.md`、`MEMORY_RETRIEVAL_V1.md`、`MEMORY_LIFECYCLE.md`、`HOST_INTEGRATION.md`、`ADR.md`（19 条决策记录）、`MEMORY_V1_1_TUNING.md`（11 个缺陷的现场）、`V2_V3_RESERVED.md`。
+配套文档：`MEMORY_SYSTEM_DESIGN_PRINCIPLES.md`（哲学与边界）、`MEMORY_SCHEMA_V1.md`（字段定义）、`MEMORY_WRITE_PIPELINE.md`、`MEMORY_READ_PIPELINE.md`、`MEMORY_RETRIEVAL_V1.md`、`MEMORY_LIFECYCLE.md`、`HOST_INTEGRATION.md`、`ADR.md`（34 条决策记录）、`DEFECT_LOG.md`（11 个缺陷的现场）、`V2_V3_RESERVED.md`。
