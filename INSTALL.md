@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Python | ≥ 3.10（开发用 3.11） | 引擎只用标准库：`sqlite3` / `json` / `hashlib` / `subprocess` |
 | Node.js | ≥ 22.19 | 插件是 ESM，且用了 `node:test`；DSH 内置的 Electron 运行时也满足 |
-| DeepSeek Harness | 0.2.x（取证基准 0.2.2-rc.1） | 插件依赖的公开 API 见 `docs/CURRENT_ENVIRONMENT_ANALYSIS.md` |
+| DeepSeek Harness | 0.2.x（取证基准 0.2.2-rc.1） | 插件依赖的公开 API 见 `docs/DESIGN.md` 第 8 节 |
 
 ---
 
