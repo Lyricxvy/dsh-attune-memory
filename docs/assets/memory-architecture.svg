@@ -11,7 +11,7 @@
 
   <rect width="1120" height="660" fill="#fbfbfd"/>
 
-  <text x="28" y="38" font-size="21" font-weight="700" fill="#1f2937">dsh-memory 记忆系统总体结构</text>
+  <text x="28" y="38" font-size="21" font-weight="700" fill="#1f2937">dsh-attune-memory 记忆系统总体结构</text>
   <text x="28" y="60" font-size="12.5" fill="#6b7280">写入决定「记不记、记成什么」，存储只有一份真相，读取决定「进不进上下文、进哪一层」</text>
 
   <!-- ============ 写入侧 ============ -->
