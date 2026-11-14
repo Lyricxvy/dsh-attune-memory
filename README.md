@@ -49,14 +49,6 @@ print(m.read_for_context(query="DSH 插件怎么调试")["context"]["text"])
 
 接入宿主需要改 profile 并重启应用，步骤见 [INSTALL.md](INSTALL.md)。
 
-文档只有三份：
-
-| 文档 | 内容 |
-|---|---|
-| [设计（原理与路径）](docs/DESIGN.md) | 为什么这样设计、对象模型、写/读/检索/生命周期、宿主接入、ADR、不做清单 |
-| [内部版本的工作、修改与缺陷](docs/INTERNAL_HISTORY.md) | 内部迭代阶段做了什么、真实缺陷与修法 |
-| [v0.1.0 更新报告](docs/releases/v0.1.0/RELEASE_NOTES.md) | 这一版有什么、怎么升级、已知限制 |
-
 ## 许可证
 
 MIT，见 [LICENSE](LICENSE)。
