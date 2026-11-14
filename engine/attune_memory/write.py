@@ -47,7 +47,11 @@ class Candidate:
     injection_policy: str = "contextual"
     confidence: float = 0.8
     keywords: list[str] | None = None
-    explicit: bool = True
+    #: 用户这一轮**明确陈述**过、且授权本次写入在置信度≥0.8 时取代冲突旧条。
+    #: 默认 False：模型不主动声明，就按"推断"处理（压 0.7 / 禁 always / 禁自动取代）。
+    #: 这是 deliberate opt-in 的深思屏障（计划书 §5.2）——它不保证真实性，只把
+    #: "误标导致静默覆盖"从默认行为降级成必须主动踩油门。
+    explicit: bool = False
     source_message_id: str | None = None
     source_conversation_id: str | None = None
     valid_from: str | None = None
@@ -680,10 +684,13 @@ def merge(
     return saved
 
 
-def forget(store: Store, memory_id: str, *, reason: str, hard: bool = False) -> dict:
-    """用户说"忘掉这个"。默认软删（可 restore），hard=True 才物理清除。"""
-    if hard:
-        return purge(store, memory_id, reason=reason)
+def forget(store: Store, memory_id: str, *, reason: str) -> dict:
+    """用户说"忘掉这个"。**只能软删**（可 restore）。
+
+    物理删除不在这里：它不可逆、且会连 memory_change 一起抹掉（无审计痕迹）。
+    硬删只保留在 CLI（``memctl forget --hard`` = forget 然后 purge）与管理页，
+    模型工具没有任何路径能直接触发。
+    """
     return store.set_status(memory_id, "deleted", reason=reason, actor="user", action="delete")
 
 

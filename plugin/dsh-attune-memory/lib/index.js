@@ -43,6 +43,9 @@ export function apply(ctx, config = {}) {
     python: settings.python,
     engineDir: settings.engineDir,
     dbPath: settings.dbPath,
+    // 发布树里包名是 attune_memory（rename.py 改名），源码树里是 memory。
+    // 默认按发布树走；源码树里跑测试时用 engineModule 配置覆盖。
+    engineModule: settings.engineModule,
     timeoutMs: settings.timeoutMs,
     log,
     debug: settings.debug,
@@ -187,41 +190,77 @@ export function apply(ctx, config = {}) {
    * 抽取写的记 'inferred'，只认前者。
    */
   async function extractAndStore(texts, sessionId, since, history = []) {
+    // 四计数（T-006）：抽取通道以前是"静默失败"的代名词 —— preview 挂了几个月，
+    // 落库 0 条，界面上看不出任何异常。现在每次 turn/end 都把"试了几次/写成几条/
+    // 被闸门拦下几条/失败几次"记进 memory_counter，诊断面板与 memory_probe 都能看见。
+    const tally = { attempt: 0, written: 0, blocked: 0, failed: 0 }
     try {
       const changes = await engine.call('recent', { since, limit: 50 })
       if (Array.isArray(changes) && changes.some((change) => change?.actor === 'user')) {
         log.info?.('dsh-attune-memory: 本轮模型已自行写入记忆，跳过兜底抽取')
+        await recordExtract(tally, { skipped: 1 })
         return
       }
     } catch (error) {
       log.debug?.(`dsh-attune-memory: 查询变更流水失败（继续抽取）：${error?.message ?? error}`)
+      tally.failed += 1
     }
 
-    let written = 0
     const tryOne = async (body) => {
       const candidates = extractCandidates(body, { sourceConversationId: sessionId })
       for (const candidate of candidates) {
+        tally.attempt += 1
         try {
           // W2：先走候选预览，拿到"会怎么落库"再决定写不写。
           // "该不该记"的判定只留在引擎里，插件不自己臆断；被拦下的那条
           // 由引擎记进丢弃日志（人能在诊断面板里看见为什么不记）。
           const plan = await engine.call('preview', candidate)
           if (!plan || plan.would === 'ignore') {
+            tally.blocked += 1
             log.debug?.(`dsh-attune-memory: 候选被闸门拦下（${plan?.reason ?? '未给出理由'}）`)
             continue
           }
           await engine.call('add', candidate)
-          written += 1
+          tally.written += 1
         } catch (error) {
+          tally.failed += 1
           log.debug?.(`dsh-attune-memory: 抽取写入失败（忽略）：${error?.message ?? error}`)
         }
       }
     }
 
-    for (const body of texts) await tryOne(body)
-    // M2：逐句抽不到、但上下文里有碎片时，把最近三句拼起来再试一次
-    // （"我叫张三" + "大三" + "郑州的" 单独看都记不下完整画像）。
-    if (written === 0 && history.length >= 2) await tryOne(history.slice(-3).join('，'))
+    try {
+      for (const body of texts) await tryOne(body)
+      // M2：逐句抽不到、但上下文里有碎片时，把最近三句拼起来再试一次
+      // （"我叫张三" + "大三" + "郑州的" 单独看都记不下完整画像）。
+      if (tally.written === 0 && history.length >= 2) await tryOne(history.slice(-3).join('，'))
+    } finally {
+      await recordExtract(tally)
+    }
+  }
+
+  /**
+   * 把一轮抽取的四个数字记进引擎。
+   *
+   * 为什么不在这里直接 log：日志只在开启 debug 时可见，而"抽取默默死了"恰恰是
+   * 没人开 debug 时才发生的。计数落库后，`memory_probe` / 诊断面板能直接读出来。
+   */
+  async function recordExtract(tally, extra = {}) {
+    const counters = {
+      extract_attempt: tally.attempt,
+      extract_written: tally.written,
+      extract_blocked: tally.blocked,
+      extract_failed: tally.failed,
+      ...(extra.skipped ? { extract_skipped: extra.skipped } : {}),
+    }
+    // 全零且没跳过就不必每次 turn/end 都写库（空轮次太多了）。
+    const total = Object.values(counters).reduce((sum, n) => sum + n, 0)
+    if (!total) return
+    try {
+      await engine.call('record', { counters })
+    } catch (error) {
+      log.debug?.(`dsh-attune-memory: 记抽取计数失败（忽略）：${error?.message ?? error}`)
+    }
   }
 
   // ---------------------------------------------------------------- T 通道
@@ -259,6 +298,7 @@ function resolveConfig(config) {
   return {
     engineDir,
     dbPath,
+    engineModule: config.engineModule ?? process.env.DSH_ATTUNE_MEMORY_ENGINE_MODULE ?? 'attune_memory.rpc',
     python: config.python ?? process.env.DSH_ATTUNE_MEMORY_PYTHON ?? 'python',
     timeoutMs: Number(config.timeoutMs ?? 5000),
     debug: config.debug === true,

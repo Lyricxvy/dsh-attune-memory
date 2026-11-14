@@ -26,7 +26,7 @@ jobs:
         run: python -m eval.run_eval
 
   plugin:
-    name: 插件测试（注入、RPC、面板、路由）
+    name: 插件测试（注入、RPC、面板、路由、抽取、端到端）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +38,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: 布局防复发闸（3 断言：包名探测自洽、测试里无裸写包名、副本可复制）
+        run: node plugin/dsh-attune-memory/test/layout-guard.test.mjs
 
       - name: 注入与去重（12 组）
         run: node plugin/dsh-attune-memory/test/recall.test.mjs
@@ -56,3 +59,12 @@ jobs:
 
       - name: 路由桩（不启引擎）
         run: node plugin/dsh-attune-memory/test/routes.stub.test.mjs
+
+      - name: 端到端穿透（6 组，真 Python 子进程）
+        run: node plugin/dsh-attune-memory/test/e2e.test.mjs
+
+      - name: 抽取落库与四计数（真引擎）
+        run: node plugin/dsh-attune-memory/test/extract-store.test.mjs
+
+      - name: 工具层 schema 与透传（6 组）
+        run: node plugin/dsh-attune-memory/test/tools.test.mjs

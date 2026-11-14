@@ -5,7 +5,7 @@
 >
 > 代码在 `engine/`（Python，纯标准库 + SQLite）与 `plugin/dsh-attune-memory/`（宿主插件）。
 > 内部迭代过程与缺陷修复见 [INTERNAL_HISTORY](INTERNAL_HISTORY.md)；
-> 当前版本有什么、怎么升级见 [v0.1.0 更新报告](releases/v0.1.0/RELEASE_NOTES.md)。
+> 当前版本有什么、怎么升级见 [v0.2.0 更新报告](releases/v0.2.0/RELEASE_NOTES.md)。
 
 **目录**
 
@@ -302,7 +302,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 - **设计**：全部收敛在这份 `DESIGN.md` 的 13 节里，不再有第二份设计文档。
 - **实现**：`engine/`（Python 引擎，可脱离宿主单测）与 `plugin/dsh-attune-memory/`（宿主插件）。
 - **过程**：每个版本为什么改、踩了什么坑、缺陷现场 → [INTERNAL_HISTORY](INTERNAL_HISTORY.md)。
-- **版本**：这一版有什么变化、怎么升级、已知限制 → [v0.1.0 更新报告](releases/v0.1.0/RELEASE_NOTES.md)。
+- **版本**：这一版有什么变化、怎么升级、已知限制 → [v0.2.0 更新报告](releases/v0.2.0/RELEASE_NOTES.md)。
 
 
 ## 2. 原理详解
@@ -1337,7 +1337,7 @@ python -m attune_memory.memctl --db <path> explain <id>
 cd engine; python tests/verify_delivery.py
 ```
 
-配套阅读：§1（哲学与边界）、§3（字段定义）、§11（34 条决策记录）、§13（边界与未决项）；11 个缺陷的现场见 [INTERNAL_HISTORY](INTERNAL_HISTORY.md) §2。
+配套阅读：§1（哲学与边界）、§3（字段定义）、§11（36 条决策记录）、§13（边界与未决项）；11 个缺陷的现场见 [INTERNAL_HISTORY](INTERNAL_HISTORY.md) §2。
 
 
 ## 3. 数据模型与 schema
@@ -4306,7 +4306,7 @@ m-mwf3bxuz-10 profile  preference  active  normal   on_demand   用户的朋友�
 
 ## 11. 架构决策记录（ADR）
 
-34 条决策，每条含被否决的备选方案与理由。改设计前先看这里，别推翻已经想清楚过的东西。
+36 条决策，每条含被否决的备选方案与理由。改设计前先看这里，别推翻已经想清楚过的东西。
 
 
 - 状态：初始化。ADR-001 ~ ADR-004 于 决策记录固化；后续每个重大取舍必须先新增 ADR，再写对应代码。
@@ -5177,6 +5177,32 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 负面：每轮多调一次 `deriveMessages()`（增量缓存，实测可忽略）；历史还没写入时仍可能误报一次，属可接受噪声。
 - 影响：`plugin/dsh-attune-memory/lib/recall.js`、`test/recall.test.mjs`（新增"历史里还在 → inject_visible"断言）。
 
+### ADR-035 引擎机器契约只有一张 OPS 注册表，插件启动即自检（T-002 第 1/5 条）
+
+**Decision**：`rpc.py` 里 `OpSpec{params, required, writes, handler}` 的 `OPS` 字典是**唯一事实源**（27 个 op 同处声明），`_SPEC` / `WRITE_OPS` / `_check_args` / dispatch 全部由它派生；新增只读 `describe` op；插件 `engine.js` 首次调用前调 `describe` 比对写操作集合，不一致就把**写操作** fail-closed（报 `BAD_CONFIG`），读操作照常。
+
+**Alternatives**：维持"白名单、必填表、dispatch、WRITE_OPS 四处分写"；用代码生成产出两端契约；不做 JS 自检，只靠测试兜。
+
+**Rejected because**：四处分写正是缺陷的成因——`_call` 有 `preview`、`_SPEC` 没有，于是 `preview` 抛 `KeyError`、兜底抽取通道整条死掉，而所有单元测试都是绿的（它们直接调引擎，绕过了 JSON 接口）。"记得同步"不是机制；代码生成要把构建链装进一个"零依赖、clone 就能跑"的插件；只靠测试只能事后发现，线上漂移仍会静默失败。
+
+**Consequences**：
+- 正面：结构性消灭"注册表有、白名单没有"这类漂移；`describe` 让 JS 侧启动就能发现两端不一致，且只拦写、不拦读（记忆暂时只读也比整个插件不加载好）。
+- 负面：27 个 op 多一层 handler 间接；`writes` 语义刻意收窄成"要不要幂等语义"，`record` / `purge_observations` 会写遥测表但**不进** WRITE_OPS——这条必须留在注释里，否则下次有人会"顺手补进去"。
+- 影响：`engine/attune_memory/rpc.py`、`plugin/dsh-attune-memory/lib/engine.js`、`TestOpsRegistry` 7 例、`test/engine.test.mjs`（自检一致 + 不一致 fail-closed 两例）。
+
+### ADR-036 推断写入默认降级，不可逆删除离开模型工具箱（T-005）
+
+**Decision**：`Candidate.explicit` 默认 `False`；推断路径统一压 `confidence ≤ 0.7`、`always` 降 `contextual`、不自动取代旧事实。工具 schema 暴露 `explicit` 但**省略即默认**（不塞 `false`）。`hard` 从 `write.forget` / `OPS['forget']` / `tools.js` 三层删除，物理删除只剩 CLI（`memctl forget --hard` = `forget`→`purge`）与管理页两段式。
+
+**Alternatives**：保持 `explicit=True`；用 `confidence` 阈值代替 `explicit`；按 T-002 的建议在工具层把 `hard:true` 改写成 `forget`→`purge` 两步。
+
+**Rejected because**：默认 True 等于"模型说的一切都算用户亲口说的"，一次误判就能把 0.7 的推断洗成 0.95、塞进 always 层，还能自动取代旧事实——不可逆、无痕迹。`confidence` 不能替代：模型对自己编出来的结论同样给 0.95，语气确定度不是真实性。把 `hard` 改名成两步只是换了名字，模型仍能触发不可逆删除且没有审计。
+
+**Consequences**：
+- 正面：不可逆操作彻底离开模型工具箱；推断写入自动降级，冲突不再被悄悄覆盖。
+- 负面：**行为不兼容**——模型不主动标 `explicit: true` 的写入会全部走推断路径（压 0.7 / 禁 always / 禁自动取代），真机首要回归点是"模型会不会正确标注"；eval 的 B、E 两条与若干既有单测需要显式传 `explicit=True`（已加注释，防止下次把"测试失败"误读成"引擎坏了"）。
+- 影响：`engine/attune_memory/write.py`、`read.py`（S1 手册补 explicit 用法）、`plugin/.../lib/tools.js`、`engine/eval/run_eval.py`、`TestExplicitDefault` 5 例、`test/tools.test.mjs` 6 组。
+
 
 ## 12. 采用决策表
 
@@ -5378,6 +5404,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 | --- | --- | --- |
 | 内部 1.0 | 单机、单用户、SQLite、词法检索 + 结构化过滤、三通道注入、可解释可纠正 | Python 引擎 + DSH 插件 |
 | 内部 1.1 | V1 + 真实使用中 10 个缺陷的修复（见 《内部版本的工作、修改与缺陷》§2） | 同上 |
+| **0.2.0（架构收口）** | 契约单一事实源（OPS 注册表 + describe + 启动自检）、explicit 默认推断、移除模型端物理删除、三条断链修复（预览/兜底抽取/诊断接口）、端到端穿透与布局防复发闸 | 同上 |
 | **0.1.0（首个公开版本）** | 内部 1.0–1.2 全部内容：数值冲突按属性、主体双侧拦、自愈频控、维护扫描、抽取走预览、二元组召回 | Python 引擎 + DSH 插件 |
 | V2 | 检索质量与维护自动化：语义召回、中文分词升级、冲突发现、异步整理 | 同形态，增强引擎 |
 | V3 | 从"条目"到"关系"：记忆图、关系感知检索、可视化 | 可能需要独立界面 |

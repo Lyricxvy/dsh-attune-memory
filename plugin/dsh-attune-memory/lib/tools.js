@@ -131,6 +131,12 @@ export function buildTools(engine, hooks = {}) {
         },
         confidence: { type: 'number', description: '0-1，你有多确定。用户明说的 0.9+，推断的不超过 0.7。' },
         keywords: { type: 'array', items: { type: 'string' }, description: '检索用的关键词，2-6 个。' },
+        explicit: {
+          type: 'boolean',
+          description: 'true=用户这一轮**明确陈述**过这件事，且授权本次写入在置信度≥0.8 时取代冲突旧条。'
+            + '省略/false=你的推测或归纳（会被压到 0.7、不能设 always、不会自动取代任何东西）。'
+            + '用户明说的事请标 true；自己归纳的不要标。',
+        },
         source_message_id: { type: 'string', description: '这句话来自哪条用户消息（如果能拿到）。' },
       },
     },
@@ -172,7 +178,7 @@ export function buildTools(engine, hooks = {}) {
         importance: { type: 'string', enum: ['key', 'important', 'normal', 'low'] },
         injection_policy: { type: 'string', enum: ['always', 'contextual', 'on_demand', 'never'] },
         confidence: { type: 'number' },
-        keywords: { type: 'string' },
+        keywords: { type: 'array', items: { type: 'string' }, description: '检索用的关键词，2-6 个。' },
       },
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
@@ -319,8 +325,8 @@ export function buildTools(engine, hooks = {}) {
   const forget = {
     name: 'memory_forget',
     description:
-      '用户明确要求忘掉某条记忆时调用。默认是软删除（仍可在管理界面恢复并说明历史），'
-      + '除非用户要求彻底清除。',
+      '用户明确要求忘掉某条记忆时调用。这是**软删除**：条目转入 deleted，可在管理界面恢复，'
+      + '历史与变更记录都留着。物理删除（不可恢复、无审计痕迹）不开放给模型，只能由用户在管理页/CLI 里做。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -328,19 +334,17 @@ export function buildTools(engine, hooks = {}) {
       properties: {
         id: { type: 'string' },
         reason: { type: 'string', description: '谁在什么情况下要求忘掉的。' },
-        hard: { type: 'boolean', description: 'true=物理删除且不可恢复，仅在用户明确要求时使用。' },
       },
     },
     output: OUTPUT,
     async execute(args) {
       try {
-        const result = await engine.call('forget', {
+        await engine.call('forget', {
           id: args.id,
           ...(args.reason ? { reason: args.reason } : {}),
-          ...(args.hard === true ? { hard: true } : {}),
         })
         afterWrite()
-        return ok(args.hard === true ? `已彻底删除 id=${args.id}` : `已忘记 id=${args.id}（可恢复）${result ? '' : ''}`)
+        return ok(`已忘记 id=${args.id}（可恢复；物理删除只能由用户在管理页/CLI 里做）`)
       } catch (error) {
         return writeFailure(error)
       }
@@ -443,6 +447,13 @@ export function buildTools(engine, hooks = {}) {
         const lines = []
         lines.push(`记忆库里：${metrics?.memories?.total ?? '?'} 条（${JSON.stringify(metrics?.memories?.by_status ?? {})}）`)
         lines.push(`S1 手册 ${local.manualChars ?? 0} 字符｜S2 稳定块 ${local.stableChars ?? 0} 字符、${(local.stableIds ?? []).length} 条`)
+        const contract = local.contract
+        if (contract) {
+          const note = contract.state === 'ok'
+            ? '正常'
+            : '**写操作已禁用**（读不受影响）：契约校验没通过，升级插件/引擎时请一起换'
+          lines.push(`引擎契约：${contract.state}${contract.detail ? `（${contract.detail}）` : ''} — ${note}`)
+        }
         const expected = counters.inject_expected ?? 0
         const visible = counters.inject_visible ?? 0
         const faded = (counters.inject_faded_compaction ?? 0) + (counters.inject_faded_unexplained ?? 0)

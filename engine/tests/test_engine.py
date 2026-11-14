@@ -34,6 +34,13 @@ class Base(unittest.TestCase):
         self.tmp.cleanup()
 
     def add(self, content: str, type: str, subtype: str, **kw):  # noqa: A002
+        """测试里默认按「用户明说」写入（explicit=True）。
+
+        v0.2.0 起引擎默认 explicit=False（推断路径：压 0.7 / 禁 always / 禁自动取代）。
+        绝大多数用例写的是"用户确实这么说过"的事实，所以这里默认 True；要测推断
+        路径请显式传 ``explicit=False``（见 TestExplicitDefault）。
+        """
+        kw.setdefault("explicit", True)
         return self.mem.add(content, type, subtype, **kw)
 
 
@@ -463,12 +470,13 @@ class TestCandidatePreview(Base):
     def test_preview_predicts_supersede(self):
         # 用明确的互斥对（需要 / 不需要）；"备考 → 放弃备考"这种改写不在极性词表里，
         # 属于 V2 的冲突发现范围（见 V2_V3_RESERVED.md）。
-        self.mem.add("用户需要每天早上复习三小时", "state", "activity", confidence=0.95)
-        pv = self.mem.preview("用户不需要每天早上复习三小时", "state", "activity", confidence=0.9)
+        self.mem.add("用户需要每天早上复习三小时", "state", "activity", confidence=0.95, explicit=True)
+        pv = self.mem.preview("用户不需要每天早上复习三小时", "state", "activity",
+                              confidence=0.9, explicit=True)
         self.assertEqual(pv["would"], "supersede")
         self.assertEqual(len(pv["conflicts"]), 1)
         self.assertEqual(self.mem.add("用户不需要每天早上复习三小时", "state", "activity",
-                                      confidence=0.9)["action"], "supersede")
+                                      confidence=0.9, explicit=True)["action"], "supersede")
 
     def test_preview_predicts_gate_reject(self):
         pv = self.mem.preview("今天天气不错", "episodic", "event")
@@ -640,22 +648,192 @@ class TestRpc(Base):
         self.assertIn("state_reason", resp["result"])
 
 
+class TestOpsRegistry(Base):
+    """T-004：OPS 是唯一事实源，_SPEC / WRITE_OPS / describe 都只是派生视图。"""
+
+    def test_spec_and_write_ops_are_derived(self):
+        self.assertEqual(rpc._SPEC, {op: spec.params for op, spec in rpc.OPS.items()})
+        self.assertEqual(set(rpc.WRITE_OPS), {op for op, spec in rpc.OPS.items() if spec.writes})
+
+    def test_describe_matches_registry(self):
+        rows = rpc.handle(self.mem, {"id": 1, "op": "describe", "args": {}})
+        self.assertTrue(rows["ok"], rows)
+        got = {row["op"]: row for row in rows["result"]}
+        self.assertEqual(set(got), set(rpc.OPS))
+        for op, spec in rpc.OPS.items():
+            self.assertEqual(got[op]["params"], list(spec.params), op)
+            self.assertEqual(got[op]["required"], list(spec.required), op)
+            self.assertEqual(got[op]["writes"], spec.writes, op)
+
+    def test_preview_is_reachable_over_rpc(self):
+        """T-002 #1 的回归：preview 曾经因为 _SPEC 缺键而变成 error:"'preview'"。"""
+        resp = rpc.handle(self.mem, {"id": 1, "op": "preview", "args": {
+            "content": "用户名叫李四，正在备考考研数学一。",
+            "type": "profile", "subtype": "identity",
+        }})
+        self.assertTrue(resp["ok"], resp)
+        self.assertIn(resp["result"]["would"], {"add", "touch", "supersede", "ignore"})
+
+    def test_every_op_passes_its_own_gate(self):
+        """每个 op 用「只给必填参数」调一次，报错也不能是门本身的错。
+
+        这条守的是「dispatch 有、白名单没有」那类漂移：只要有一个 op 没进表，
+        这里就会看到「未知操作」或「不接受这些参数」。
+        """
+        mid = self.add("用户偏好中文回答", "profile", "interaction")["memory"]["id"]
+        required_args = {
+            "add": {"content": "用户叫王五", "type": "profile", "subtype": "identity"},
+            "preview": {"content": "用户叫王五", "type": "profile", "subtype": "identity"},
+            "update": {"id": mid, "fields": {"content": "用户偏好中文作答"}},
+            "supersede": {"id": mid, "content": "用户偏好英文回答"},
+            "merge": {"ids": [mid], "content": "用户偏好中文回答"},
+            "archive": {"id": mid}, "delete": {"id": mid}, "forget": {"id": mid},
+            "restore": {"id": mid}, "purge": {"id": mid},
+            "get": {"id": mid}, "explain": {"id": mid},
+            "find_similar": {"content": "用户偏好中文回答"},
+            "recent": {"since": "2000-01-01T00:00:00Z"},
+        }
+        for op in rpc.OPS:
+            with self.subTest(op=op):
+                resp = rpc.handle(self.mem, {"id": 1, "op": op, "args": required_args.get(op, {})})
+                error = str(resp.get("error") or "")
+                for bad in ("未知操作", "不接受这些参数", "缺少必填参数"):
+                    self.assertNotIn(bad, error, f"{op} 没过门：{error}")
+
+    def test_missing_required_is_reported_per_op(self):
+        resp = rpc.handle(self.mem, {"id": 1, "op": "add", "args": {"content": "只有正文"}})
+        self.assertFalse(resp["ok"])
+        self.assertIn("缺少必填参数", resp["error"])
+        self.assertIn("type", resp["error"])
+
+    def test_unknown_op_lists_available(self):
+        resp = rpc.handle(self.mem, {"id": 1, "op": "nope", "args": {}})
+        self.assertFalse(resp["ok"])
+        self.assertIn("未知操作", resp["error"])
+        self.assertIn("describe", resp["error"])
+
+    def test_handlers_only_consume_declared_params(self):
+        """handler 只能从「已被 _check_args 放行的键」里取值。
+
+        用一个记账假 Memory 顶替真引擎：谁把未声明的键当 kwarg 传给 manager，
+        这里就会多出一个键。
+        """
+
+        class Recorder:
+            def __init__(self):
+                self.calls = []
+
+            def __getattr__(self, name):
+                def fn(*args, **kwargs):
+                    self.calls.append((name, set(kwargs)))
+                    return {"ok": True}
+
+                return fn
+
+        mid = "m-x"
+        required_args = {
+            "add": {"content": "c", "type": "profile", "subtype": "identity"},
+            "preview": {"content": "c", "type": "profile", "subtype": "identity"},
+            "update": {"id": mid, "fields": {"content": "c"}},
+            "supersede": {"id": mid, "content": "c"},
+            "merge": {"ids": [mid], "content": "c"},
+            "archive": {"id": mid}, "delete": {"id": mid}, "forget": {"id": mid},
+            "restore": {"id": mid}, "purge": {"id": mid},
+            "get": {"id": mid}, "explain": {"id": mid},
+            "find_similar": {"content": "c"},
+            "recent": {"since": "2000-01-01T00:00:00Z"},
+        }
+        for op, spec in rpc.OPS.items():
+            with self.subTest(op=op):
+                rec = Recorder()
+                spec.handler(rec, dict(required_args.get(op, {})))
+                # update 的字段是从 args["fields"] 里展开的：它们的名字由
+                # write.update() 的字段白名单管，不属于 OPS 的 params。
+                expanded = set(required_args.get(op, {}).get("fields", {}))
+                for _name, kwargs in rec.calls:
+                    extra = kwargs - set(spec.params) - expanded
+                    self.assertFalse(extra, f"{op} 的 handler 用了未声明参数：{sorted(extra)}")
+
+
+class TestExplicitDefault(Base):
+    """T-005：explicit 默认 False —— 覆盖必须 deliberate opt-in（计划书 §5.2）。"""
+
+    def test_default_is_inferred(self):
+        """不传 explicit 时按推断处理：conf 压到 0.7，always 降级成 contextual。"""
+        row = self.mem.add("用户好像偏好简洁的回答", "profile", "preference",
+                           confidence=0.95, injection_policy="always")
+        mem = row["memory"]
+        self.assertEqual(mem["confidence"], 0.7)
+        self.assertEqual(mem["injection_policy"], "contextual")
+
+    def test_explicit_true_is_kept(self):
+        row = self.mem.add("用户要求叫他「哥哥」", "profile", "interaction",
+                           confidence=0.95, injection_policy="always", explicit=True)
+        mem = row["memory"]
+        self.assertEqual(mem["confidence"], 0.95)
+        self.assertEqual(mem["injection_policy"], "always")
+
+    def test_inferred_never_auto_supersedes(self):
+        """同一槽位互斥时，推断只并存并标注冲突，不动旧条。"""
+        old = self.add("用户正在备考数学一", "state", "goal", confidence=0.9)
+        inferred = self.mem.add("用户不考数学一了，准备直接工作", "state", "goal",
+                                confidence=0.9)
+        self.assertEqual(inferred["action"], "add", inferred)
+        self.assertEqual(self.mem.get(old["memory"]["id"])["status"], "active")
+        # 并存的那条会带上冲突标记，供后续 explain 与 memctl scan 使用
+        self.assertIn("conflict", str(inferred["memory"].get("metadata") or {})
+                      + str(inferred.get("reason") or ""))
+
+    def test_explicit_high_confidence_auto_supersedes(self):
+        """显式 + 置信度≥0.8 才允许自动取代。"""
+        old = self.add("用户正在备考数学一", "state", "goal", confidence=0.9)
+        explicit = self.mem.add("用户不考数学一了，准备直接工作", "state", "goal",
+                                confidence=0.9, explicit=True)
+        self.assertEqual(explicit["action"], "supersede", explicit)
+        self.assertEqual(self.mem.get(old["memory"]["id"])["status"], "superseded")
+
+    def test_supersede_keeps_confidence(self):
+        """显式取代 = 已经踩下油门：新条不该被推断降级压到 0.7（T-007 抓到）。"""
+        mid = self.mem.add("用户英语一目标 70 分", "state", "goal",
+                           confidence=0.9, explicit=True)["memory"]["id"]
+        out = self.mem.supersede(mid, "用户英语一目标 80 分", reason="用户改口")
+        self.assertEqual(float(out["memory"]["confidence"]), 0.9)
+        self.assertEqual(self.mem.get(mid)["status"], "superseded")
+
+    def test_write_forget_has_no_hard(self):
+        """物理删除不开放给引擎调用方：forget 只有软删，purge 要求先 deleted。"""
+        from inspect import signature
+
+        from attune_memory import write as write_mod
+
+        self.assertNotIn("hard", signature(write_mod.forget).parameters)
+        mid = self.add("用户叫李四", "profile", "identity")["memory"]["id"]
+        self.mem.forget(mid, reason="用户要求忘记")
+        self.assertEqual(self.mem.get(mid)["status"], "deleted")
+        # 物理删除仍可用，但必须显式走 purge（CLI/管理页那条路）
+        self.mem.purge(mid, reason="用户在管理页确认物理删除")
+        self.assertIsNone(self.mem.get(mid))
+
+
 class TestSupersedeConfidence(Base):
     """模块 5：冲突不再一律自动取代，按"谁说的 + 多确定"分三档。"""
 
     def _seed(self, content="用户不考数学一了，改考计算机 408。"):
-        return self.mem.add("用户正在备考考研数学一。", "state", "goal", confidence=0.95)["memory"]["id"]
+        return self.mem.add("用户正在备考考研数学一。", "state", "goal",
+                            confidence=0.95, explicit=True)["memory"]["id"]
 
     def test_explicit_high_confidence_supersedes(self):
         old_id = self._seed()
-        out = self.mem.add("用户不考数学一了，改考计算机 408。", "state", "goal", confidence=0.9)
+        out = self.mem.add("用户不考数学一了，改考计算机 408。", "state", "goal",
+                           confidence=0.9, explicit=True)
         self.assertEqual(out["action"], "supersede")
         self.assertEqual(self.mem.get(old_id)["status"], "superseded")
         self.assertEqual(self.mem.get(old_id)["superseded_by"], out["memory"]["id"])
 
     def test_explicit_mid_confidence_keeps_both(self):
         old_id = self._seed()
-        out = self.mem.add("用户不考数学一了，改考计算机 408。", "state", "goal", confidence=0.7)
+        out = self.mem.add("用户不考数学一了，改考计算机 408。", "state", "goal",
+                           confidence=0.7, explicit=True)
         self.assertEqual(out["action"], "add")
         self.assertEqual(self.mem.get(old_id)["status"], "active")
         self.assertEqual(out["memory"]["metadata"]["conflict_with"], old_id)

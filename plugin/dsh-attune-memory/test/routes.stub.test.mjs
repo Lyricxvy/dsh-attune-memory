@@ -57,6 +57,14 @@ const engine = {
         return { ...ROW, id: args.id, status: "active" };
       case "tick":
         return { archived: 0 };
+      case "reads":
+        return [
+          { at: "2026-11-14T12:00:00Z", query: "数学一极限题", candidates: 7, hits: 2, injected: 2, groups: { state: 1, profile: 1 } }
+        ];
+      case "discarded":
+        return [
+          { at: "2026-11-14T12:00:00Z", content: "用户今天有点困", reason: "时效性内容" }
+        ];
       default:
         throw new Error(`unexpected op ${op}`);
     }
@@ -168,6 +176,30 @@ try {
   // missing id on a POST → 400, not a crash
   const noId = await call("POST", "/api/update", { content: "x" });
   assert.equal(noId.statusCode, 400);
+
+  // --- /api/reads 与 /api/discarded：两条曾经引用未定义 json/q 的接口
+  const reads = await call("GET", "/api/reads?limit=8");
+  assert.equal(reads.statusCode, 200, "reads status");
+  assert.equal(reads.json.ok, true, "reads ok");
+  assert.equal(reads.json.rows.length, 1, "reads wraps the engine rows");
+  assert.equal(reads.json.rows[0].query, "数学一极限题", "reads row fields survive");
+  const readsCall = calls.filter(([op]) => op === "reads").at(-1);
+  assert.equal(readsCall[1].limit, 8, "limit arrives as a number");
+
+  const readsDefault = await call("GET", "/api/reads");
+  assert.equal(calls.filter(([op]) => op === "reads").at(-1)[1].limit, 20, "no limit falls back to 20");
+
+  const readsBad = await call("GET", "/api/reads?limit=abc");
+  assert.equal(readsBad.json.ok, true, "a non-numeric limit is not an error");
+  assert.equal(calls.filter(([op]) => op === "reads").at(-1)[1].limit, 20, "non-numeric limit falls back");
+
+  const discarded = await call("GET", "/api/discarded?limit=8");
+  assert.equal(discarded.statusCode, 200, "discarded status");
+  assert.equal(discarded.json.ok, true, "discarded ok");
+  assert.equal(discarded.json.rows[0].reason, "时效性内容", "discarded rows carry the reason");
+
+  const discardedHuge = await call("GET", "/api/discarded?limit=99999");
+  assert.equal(calls.filter(([op]) => op === "discarded").at(-1)[1].limit, 200, "limit is capped at 200");
 
   // the fence
   ctx.connection.requestRejection = () => 403;

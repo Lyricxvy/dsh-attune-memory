@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import const
@@ -18,39 +19,202 @@ from .manager import Memory
 from .store import InvariantError
 from .write import CandidateError
 
-#: 每个 op 允许的参数。多传的参数直接报错——静默忽略会让调用方以为生效了。
-_SPEC: dict[str, tuple[str, ...]] = {
-    "add": ("content", "type", "subtype", "subject_type", "subject_name", "domain_key",
-            "scope", "importance", "injection_policy", "confidence", "keywords", "explicit",
-            "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata"),
-    "update": ("id", "fields", "reason"),
-    "supersede": ("id", "content", "reason", "confidence", "importance", "keywords",
-                  "injection_policy", "valid_until", "metadata"),
-    "merge": ("ids", "content", "reason", "importance", "keywords"),
-    "archive": ("id", "reason"),
-    "delete": ("id", "reason"),
-    "forget": ("id", "reason"),
-    "restore": ("id", "reason"),
-    "purge": ("id", "reason"),
-    "get": ("id",),
-    "explain": ("id",),
-    "list": ("status", "type", "subtype", "domain_key", "policy", "limit", "offset"),
-    "search": ("query", "domain", "type", "subtypes", "policies", "limit", "task_key",
-               "include_expired", "include_superseded", "include_never"),
-    "find_similar": ("content", "type", "subtype", "subject_type", "subject_name",
-                     "domain_key", "limit"),
-    "read_for_context": ("query", "domain", "task_key"),
-    "recent": ("since", "limit"),
-    "stats": (),
-    "tick": (),
-    "scan": ("limit",),
-    "record": ("counters", "observation", "injected_ids"),
-    "metrics": ("limit",),
-    "telemetry": ("limit",),
-    "reads": ("limit",),
-    "discarded": ("limit",),
-    "purge_observations": ("kind",),
+#: 引擎的机器契约只有一处 —— 下面这张 OPS 表。以前 _SPEC / _required / _call / WRITE_OPS
+#: 分散在四个地方，于是出现了"dispatch 有 preview、白名单没有"这种漂移（T-002 第 1 条）。
+#: 现在 params/required/writes/handler 同处声明，其余全部派生。
+
+@dataclass(frozen=True)
+class OpSpec:
+    """一个 op 的完整契约：允许什么参数、哪些必填、是否写操作、怎么执行。
+
+    四者必须同处声明 —— 这正是 T-002 暴露的那类漂移（``_call`` 有 preview、
+    ``_SPEC`` 没有）在结构上不可能再发生的原因：白名单与 dispatch 都从这张表派生。
+    """
+
+    params: tuple[str, ...]
+    required: tuple[str, ...]
+    writes: bool
+    handler: Callable[["Memory", dict[str, Any]], Any]
+
+
+def _rest(args: dict[str, Any], *taken: str) -> dict[str, Any]:
+    """取「除这几个键之外」的其余参数，交给 manager 的 **kwargs。"""
+    return {k: v for k, v in args.items() if k not in taken}
+
+
+def _op_add(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.add(**a)
+
+
+def _op_preview(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.preview(**a)
+
+
+def _op_update(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.update(a["id"], reason=a.get("reason", "模型修正"), **dict(a["fields"]))
+
+
+def _op_supersede(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.supersede(a["id"], a["content"], **_rest(a, "id", "content"))
+
+
+def _op_merge(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.merge(a["ids"], a["content"], **_rest(a, "ids", "content"))
+
+
+def _op_archive(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.archive(a["id"], reason=a.get("reason", "不再需要"))
+
+
+def _op_forget(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.forget(a["id"], reason=a.get("reason", "用户要求忘记"))
+
+
+def _op_restore(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.restore(a["id"], reason=a.get("reason", "恢复"))
+
+
+def _op_purge(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.purge(a["id"], reason=a.get("reason", "物理删除"))
+
+
+def _op_get(mem: Memory, a: dict[str, Any]) -> Any:
+    # 查不到不是错误：get 的契约就是"有就返回，没有就 null"。
+    # 让这里抛异常会把 404 变成 400，调用方永远分不清"没有"和"出错"。
+    return mem.get(a["id"])
+
+
+def _op_explain(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.explain(a["id"])
+
+
+def _op_list(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.list(**a)
+
+
+def _op_search(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.search(**a)
+
+
+def _op_find_similar(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.find_similar(**a)
+
+
+def _op_read_for_context(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.read_for_context(**a)
+
+
+def _op_recent(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.recent(a["since"], a.get("limit", 50))
+
+
+def _op_stats(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.stats()
+
+
+def _op_tick(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.tick()
+
+
+def _op_scan(mem: Memory, a: dict[str, Any]) -> Any:
+    limit = a.get("limit", 500)
+    return mem.scan(limit=limit if isinstance(limit, int) and limit > 0 else 500)
+
+
+def _op_record(mem: Memory, a: dict[str, Any]) -> Any:
+    ids = a.get("injected_ids")
+    return mem.record(
+        a.get("counters"),
+        a.get("observation"),
+        ids if isinstance(ids, list) else None,
+    )
+
+
+def _op_telemetry(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.telemetry(limit=a.get("limit", 20))
+
+
+def _op_reads(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.reads(limit=a.get("limit", 20))
+
+
+def _op_discarded(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.discarded(limit=a.get("limit", 20))
+
+
+def _op_metrics(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.metrics(limit=a.get("limit", 20))
+
+
+def _op_purge_observations(mem: Memory, a: dict[str, Any]) -> Any:
+    return mem.purge_observations(a.get("kind"))
+
+
+def _op_describe(mem: Memory, a: dict[str, Any]) -> Any:
+    return describe_ops()
+
+
+#: **唯一**的 op 契约表。新增 op 只改这里；白名单、必填、写标志、dispatch 全部派生。
+OPS: dict[str, OpSpec] = {
+    "add": OpSpec(
+        ("content", "type", "subtype", "subject_type", "subject_name", "domain_key",
+         "scope", "importance", "injection_policy", "confidence", "keywords", "explicit",
+         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata"),
+        ("content", "type", "subtype"), True, _op_add),
+    "preview": OpSpec(
+        ("content", "type", "subtype", "subject_type", "subject_name", "domain_key",
+         "scope", "importance", "injection_policy", "confidence", "keywords", "explicit",
+         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata"),
+        ("content", "type", "subtype"), False, _op_preview),
+    "update": OpSpec(("id", "fields", "reason"), ("id", "fields"), True, _op_update),
+    "supersede": OpSpec(
+        ("id", "content", "reason", "confidence", "importance", "keywords",
+         "injection_policy", "valid_until", "metadata"),
+        ("id", "content"), True, _op_supersede),
+    "merge": OpSpec(("ids", "content", "reason", "importance", "keywords"),
+                    ("ids", "content"), True, _op_merge),
+    "archive": OpSpec(("id", "reason"), ("id",), True, _op_archive),
+    "delete": OpSpec(("id", "reason"), ("id",), True, _op_forget),
+    "forget": OpSpec(("id", "reason"), ("id",), True, _op_forget),
+    "restore": OpSpec(("id", "reason"), ("id",), True, _op_restore),
+    "purge": OpSpec(("id", "reason"), ("id",), True, _op_purge),
+    "get": OpSpec(("id",), ("id",), False, _op_get),
+    "explain": OpSpec(("id",), ("id",), False, _op_explain),
+    "list": OpSpec(("status", "type", "subtype", "domain_key", "policy", "limit", "offset"),
+                   (), False, _op_list),
+    "search": OpSpec(("query", "domain", "type", "subtypes", "policies", "limit", "task_key",
+                      "include_expired", "include_superseded", "include_never"),
+                     (), False, _op_search),
+    "find_similar": OpSpec(("content", "type", "subtype", "subject_type", "subject_name",
+                            "domain_key", "limit"), ("content",), False, _op_find_similar),
+    "read_for_context": OpSpec(("query", "domain", "task_key"), (), False, _op_read_for_context),
+    "recent": OpSpec(("since", "limit"), ("since",), False, _op_recent),
+    "stats": OpSpec((), (), False, _op_stats),
+    "tick": OpSpec((), (), True, _op_tick),
+    "scan": OpSpec(("limit",), (), False, _op_scan),
+    # record / purge_observations 会改库，但改的是遥测表，不是记忆本身。
+    # 它们不进 WRITE_OPS：注入记账每轮都发生，给它套幂等回放只会让 memory_request 膨胀。
+    "record": OpSpec(("counters", "observation", "injected_ids"), (), False, _op_record),
+    "metrics": OpSpec(("limit",), (), False, _op_metrics),
+    "telemetry": OpSpec(("limit",), (), False, _op_telemetry),
+    "reads": OpSpec(("limit",), (), False, _op_reads),
+    "discarded": OpSpec(("limit",), (), False, _op_discarded),
+    "purge_observations": OpSpec(("kind",), (), False, _op_purge_observations),
+    "describe": OpSpec((), (), False, _op_describe),
 }
+
+#: 派生视图：给测试与兼容旧代码用，不是第二份事实源。
+#: ``writes`` 的语义刻意收窄成"要不要幂等语义"，不是"会不会改库"——遥测写入不进这张名单。
+_SPEC: dict[str, tuple[str, ...]] = {op: spec.params for op, spec in OPS.items()}
+WRITE_OPS: frozenset[str] = frozenset(op for op, spec in OPS.items() if spec.writes)
+
+
+def describe_ops() -> list[dict[str, Any]]:
+    """返回每个 op 的机器契约（JS 侧启动自检就比对这份）。"""
+    return [
+        {"op": op, "params": list(spec.params), "required": list(spec.required), "writes": spec.writes}
+        for op, spec in OPS.items()
+    ]
 
 
 class RpcError(ValueError):
@@ -58,103 +222,25 @@ class RpcError(ValueError):
 
 
 def _check_args(op: str, args: dict) -> None:
-    allowed = _SPEC[op]
-    extra = set(args) - set(allowed)
+    """唯一门：任何不在 params 里的参数直接拒。
+
+    在 handler 之前拦，handler 就永远不可能"静默吃下一个未声明参数"。
+    """
+    spec = OPS[op]
+    extra = set(args) - set(spec.params)
     if extra:
-        raise RpcError(f"{op} 不接受这些参数：{sorted(extra)}；可用：{list(allowed)}")
-    missing = [k for k in ("id", "content", "type", "subtype", "ids", "fields")
-               if k in allowed and k not in args and _required(op, k)]
+        raise RpcError(f"{op} 不接受这些参数：{sorted(extra)}；可用：{list(spec.params)}")
+    missing = [k for k in spec.required if k not in args]
     if missing:
         raise RpcError(f"{op} 缺少必填参数：{missing}")
 
 
-def _required(op: str, key: str) -> bool:
-    return {
-        "add": {"content", "type", "subtype"},
-        "preview": {"content", "type", "subtype"},
-        "update": {"id", "fields"},
-        "supersede": {"id", "content"},
-        "merge": {"ids", "content"},
-        "archive": {"id"},
-        "delete": {"id"},
-        "forget": {"id"},
-        "restore": {"id"},
-        "purge": {"id"},
-        "get": {"id"},
-        "explain": {"id"},
-        "find_similar": {"content"},
-    }.get(op, set()).__contains__(key)
-
-
 def _call(mem: Memory, op: str, args: dict[str, Any]) -> Any:
+    spec = OPS.get(op)
+    if spec is None:
+        raise RpcError(f"未知操作：{op}；可用：{sorted(OPS)}")
     _check_args(op, args)
-    if op == "preview":
-        return mem.preview(**args)
-    if op == "add":
-        return mem.add(args.pop("content"), args.pop("type"), args.pop("subtype"), **args)
-    if op == "update":
-        fields = dict(args.pop("fields"))
-        reason = args.pop("reason", "模型修正")
-        return mem.update(args.pop("id"), reason=reason, **fields)
-    if op == "supersede":
-        mid = args.pop("id")
-        return mem.supersede(mid, args.pop("content"), **args)
-    if op == "merge":
-        ids = args.pop("ids")
-        return mem.merge(ids, args.pop("content"), **args)
-    if op == "archive":
-        return mem.archive(args["id"], reason=args.get("reason", "不再需要"))
-    if op in ("delete", "forget"):
-        return mem.forget(args["id"], reason=args.get("reason", "用户要求忘记"))
-    if op == "restore":
-        return mem.restore(args["id"], reason=args.get("reason", "恢复"))
-    if op == "purge":
-        return mem.purge(args["id"], reason=args.get("reason", "物理删除"))
-    if op == "get":
-        # 查不到不是错误：get 的契约就是"有就返回，没有就 null"。
-        # 让这里抛异常会把 404 变成 400，调用方永远分不清"没有"和"出错"。
-        return mem.get(args["id"])
-    if op == "explain":
-        return mem.explain(args["id"])
-    if op == "list":
-        return mem.list(**args)
-    if op == "search":
-        return mem.search(**args)
-    if op == "find_similar":
-        return mem.find_similar(**args)
-    if op == "read_for_context":
-        return mem.read_for_context(**args)
-    if op == "recent":
-        return mem.recent(args["since"], args.get("limit", 50))
-    if op == "stats":
-        return mem.stats()
-    if op == "tick":
-        return mem.tick()
-    if op == "scan":
-        limit = args.get("limit", 500)
-        return mem.scan(limit=limit if isinstance(limit, int) and limit > 0 else 500)
-    if op == "record":
-        ids = args.get("injected_ids")
-        return mem.record(
-            args.get("counters"),
-            args.get("observation"),
-            ids if isinstance(ids, list) else None,
-        )
-    if op == "telemetry":
-        return mem.telemetry(limit=args.get("limit", 20))
-    if op == "reads":
-        return mem.reads(limit=args.get("limit", 20))
-    if op == "discarded":
-        return mem.discarded(limit=args.get("limit", 20))
-    if op == "metrics":
-        return mem.metrics(limit=args.get("limit", 20))
-    if op == "purge_observations":
-        return mem.purge_observations(args.get("kind"))
-    raise RpcError(f"未知操作：{op}；可用：{sorted(_SPEC)}")
-
-
-WRITE_OPS = {"add", "update", "supersede", "merge", "forget", "purge", "restore",
-             "archive", "delete", "tick"}
+    return spec.handler(mem, args)
 
 
 def handle(mem: Memory, req: dict) -> dict:

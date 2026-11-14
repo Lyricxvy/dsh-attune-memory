@@ -32,6 +32,16 @@ import { PAGE_HTML } from './ui.js';
 export const ROUTE_BASE = '/dsh-attune-memory';
 const MAX_BODY = 1024 * 1024;
 
+/**
+ * 把 URL 上的 limit 收敛成安全整数：非数字 / 0 / 负数回退默认值，上限封顶。
+ * 直接把手里的字符串丢给引擎，等于让 SQL 的 LIMIT 去解释它 —— 参数校验应该在边界做完。
+ */
+function clampLimit(raw, fallback, max = 200) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(Math.floor(value), max);
+}
+
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
   res.statusCode = status;
@@ -169,12 +179,16 @@ export function registerRoutes(ctx, deps) {
         return sendJson(res, 200, { ok: true, stats: await engine.call('stats', {}) });
       }
 
+      // 两条诊断接口：引擎返回的是行数组，按页面既有的约定包成 { ok, rows }
+      // （ui.js 的 loadDiag 读的就是 r.rows；换成别的键名会让诊断区永远显示空）。
       if (sub === '/api/reads' && method === 'GET') {
-        return json(200, await engine.call('reads', { limit: q.get('limit') || 20 }))
+        const limit = clampLimit(query.limit, 20);
+        return sendJson(res, 200, { ok: true, rows: await engine.call('reads', { limit }) });
       }
 
       if (sub === '/api/discarded' && method === 'GET') {
-        return json(200, await engine.call('discarded', { limit: q.get('limit') || 20 }))
+        const limit = clampLimit(query.limit, 20);
+        return sendJson(res, 200, { ok: true, rows: await engine.call('discarded', { limit }) });
       }
 
       if (sub === '/api/update' && method === 'POST') {

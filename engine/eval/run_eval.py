@@ -163,9 +163,12 @@ def scenario_b(rpc: Rpc) -> list[Case]:
     ))
 
     # 非 user 主体不能 always：否则"朋友喜欢红色"会每轮注入给用户看
+    # 显式传 explicit=True：这条测的是「非 user 主体 + always」这条不变量本身，
+    # 不能让「推断降级」先把 always 改成 contextual 从而绕开校验。
     ok2, msg2 = expect_error(rpc, "add", contains="always",
                              content="我朋友小王喜欢红色", type="profile", subtype="preference",
-                             subject_type="person", subject_name="小王", injection_policy="always")
+                             subject_type="person", subject_name="小王", injection_policy="always",
+                             explicit=True)
     cases.append(Case("B 非 user 主体禁止 always", ok2, msg2[:110]))
     return cases
 
@@ -265,12 +268,14 @@ def scenario_d(rpc: Rpc) -> list[Case]:
 # --------------------------------------------------------------------------- E
 def scenario_e(rpc: Rpc) -> list[Case]:
     cases: list[Case] = []
+    # 这两条是「用户明确交代的领域约定」，必须 explicit=True —— 领域约定补位要求
+    # confidence>=0.8，而推断路径会把置信度压到 0.7（v0.2.0 起 explicit 默认 False）。
     math_rule = rpc.call("add", content="讲数学题时先讲思路再给步骤，不要直接抛公式",
                          type="profile", subtype="interaction", scope="domain",
-                         domain_key="study.math", importance="important")
+                         domain_key="study.math", importance="important", explicit=True)
     write_rule = rpc.call("add", content="写文案时先给三个不同方向，再展开其中一个",
                           type="profile", subtype="interaction", scope="domain",
-                          domain_key="writing", importance="important")
+                          domain_key="writing", importance="important", explicit=True)
 
     math_ctx = json.dumps(rpc.call("read_for_context", query="这道极限题怎么下手",
                                    domain="study.math"), ensure_ascii=False)

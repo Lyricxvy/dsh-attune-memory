@@ -73,6 +73,10 @@ class Memory:
             confidence=kwargs.pop("confidence", old["confidence"]),
             metadata=kwargs.pop("metadata", old["metadata"]),
             user_id=old["user_id"],
+            # 显式取代本身就是"深思后按下的油门"：模型/用户已经选定用新事实覆盖旧的，
+            # 所以新条默认按 explicit 记，否则 v0.2.0 的推断降级会把它的置信度压到 0.7、
+            # 把 always 降成 contextual —— 一次用户明说的纠正反而丢掉了力度。
+            explicit=kwargs.pop("explicit", True),
         )
         payload.update(kwargs)
         reason = payload.pop("reason", f"取代 {memory_id}")

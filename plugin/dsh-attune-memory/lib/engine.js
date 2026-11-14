@@ -14,11 +14,13 @@ import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 
 /**
- * 写类操作。它们会在库里留下痕迹，所以：
- *   - 每次调用都带一个 `dedupe` 键（同一次逻辑写入的多次重试共用一个键）；
- *   - 只有带同一个键的重复请求才会在引擎侧被识别成"重复"并原样返回上次的响应。
+ * 写类操作的**引导名单**。真正的权威是引擎的 OPS 注册表（`describe` 里的 writes 标志）。
+ *
+ * 这份常量只在两种时候有用：自检还没跑完，以及引擎明确报错退出（那说明子进程有异常）。
+ * 自检通过后 `#writeOps` 会被引擎的名单整体替换 —— 以前两边各写一份，于是出现了
+ * `tick` 只在 Python 侧算写操作的漂移（T-002 第 5 条）。
  */
-const WRITE_OPS = new Set(['add', 'update', 'supersede', 'merge', 'forget', 'purge', 'restore', 'archive', 'delete'])
+const WRITE_OPS = new Set(['add', 'update', 'supersede', 'merge', 'forget', 'purge', 'restore', 'archive', 'delete', 'tick'])
 /** 可以安全重试的错误：请求可能根本没被处理，或者进程已经死了。 */
 const RETRYABLE = new Set(['TIMEOUT', 'ENGINE_DEAD'])
 
@@ -47,8 +49,15 @@ export class EngineClient {
   #nextId = 1
   #queue = Promise.resolve()
   #closed = false
+  // 契约自检状态：pending 未跑 | ok 一致 | mismatch 不一致 | unavailable 自检跑不起来（都是写操作禁用）
+  #contract = 'pending'
+  #contractPromise = null
+  #contractDetail = ''
+  #writeOps = new Set(WRITE_OPS)
 
-  constructor({ python = 'python', engineDir, engineModule = 'attune_memory.rpc', dbPath, timeoutMs = 5000, log, debug = false }) {
+  constructor({ python = 'python', engineDir, engineModule = 'attune_memory.rpc', dbPath, timeoutMs = 5000, log, debug = false, writeOps }) {
+    // writeOps 只给测试用：故意传一份错的名单，验证自检会红。
+    if (writeOps) this.#writeOps = new Set(writeOps)
     if (!engineDir) throw new EngineError('engineDir 未配置：找不到 memory 引擎目录', { code: 'BAD_CONFIG' })
     this.#python = python
     this.#engineDir = engineDir
@@ -70,12 +79,22 @@ export class EngineClient {
    * @param {object} args
    */
   call(op, args = {}, options = {}) {
-    const write = WRITE_OPS.has(op)
+    const write = this.#writeOps.has(op)
     // 写操作默认带幂等键：调用方没给就造一个，重试时复用同一个。
     const dedupe = write ? (options.dedupe ?? randomUUID()) : undefined
     const body = dedupe ? { ...args, __dedupe: dedupe } : args
     const attempts = options.retries ?? (write ? 1 : 1)
-    const run = () => this.#withRetry(op, body, attempts, write)
+    const run = async () => {
+      await this.#ensureContract()
+      // 契约没对齐（或压根拿不到）时只禁写：读失败顶多少记一条，写错会污染记忆库。
+      if (write && this.#contract !== 'ok') {
+        const why = this.#contract === 'mismatch'
+          ? `引擎契约与插件白名单不一致：${this.#contractDetail}`
+          : `引擎不支持 describe，无法校验写操作契约（${this.#contractDetail || '自检未完成'}）`
+        throw new EngineError(`${why}；写操作已禁用（读操作不受影响）`, { code: 'BAD_CONFIG' })
+      }
+      return this.#withRetry(op, body, attempts, write)
+    }
     const result = this.#queue.then(run, run)
     // 队列本身不能因为某一次失败而断掉，所以把 rejection 就地吞掉再抛给调用方。
     this.#queue = result.then(
@@ -83,6 +102,51 @@ export class EngineClient {
       () => undefined,
     )
     return result
+  }
+
+  /**
+   * 启动自检（T-004）：问引擎要 describe，比对写操作集合。
+   *
+   * 为什么是"写操作"而不是"全部 op"：读操作多一个少一个最多是功能缺失，
+   * 写操作判错却会让同一份数据被写两遍或写不进去 —— 这是必须 fail-closed 的那一半。
+   */
+  #ensureContract() {
+    if (this.#contract !== 'pending') return Promise.resolve()
+    this.#contractPromise ??= this.#runContractCheck()
+    return this.#contractPromise
+  }
+
+  async #runContractCheck() {
+    try {
+      const rows = await this.#request('describe', {})
+      const engineOps = new Set(rows.filter((row) => row?.writes).map((row) => row.op))
+      const onlyLocal = [...this.#writeOps].filter((op) => !engineOps.has(op)).sort()
+      const onlyEngine = [...engineOps].filter((op) => !this.#writeOps.has(op)).sort()
+      if (onlyLocal.length || onlyEngine.length) {
+        this.#contract = 'mismatch'
+        this.#contractDetail = `插件多 ${JSON.stringify(onlyLocal)}、引擎多 ${JSON.stringify(onlyEngine)}`
+        this.#log?.error?.(`dsh-attune-memory 契约自检失败：${this.#contractDetail}；写操作已禁用，读操作不受影响`)
+        return
+      }
+      // 以引擎为准：从此不再看本地常量。
+      this.#writeOps = engineOps
+      this.#contract = 'ok'
+    } catch (error) {
+      // describe 不可用 = 引擎与插件版本不匹配（v0.2.0 起引擎必然实现 describe）。
+      // 这里**不能**退回本地名单：那等于"校验失败就用未经校验的假设继续写"，
+      // 正是评审指出的绕过路径。改为契约不可用 → 写操作 fail-closed，读照常。
+      this.#contract = 'unavailable'
+      this.#contractDetail = `${error?.code ?? 'UNKNOWN'}: ${message(error)}`
+      this.#log?.error?.(
+        `dsh-attune-memory 契约自检失败（${this.#contractDetail}）；`
+        + '写操作已禁用，读操作不受影响。请确认插件与引擎是同一版本（引擎需实现 describe）。',
+      )
+    }
+  }
+
+  /** 自检状态，测试与 memory_probe 用。 */
+  get contract() {
+    return { state: this.#contract, detail: this.#contractDetail, writeOps: [...this.#writeOps].sort() }
   }
 
   async #withRetry(op, args, attempts, write) {
