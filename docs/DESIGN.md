@@ -5,7 +5,7 @@
 >
 > 代码在 `engine/`（Python，纯标准库 + SQLite）与 `plugin/dsh-attune-memory/`（宿主插件）。
 > 内部迭代过程与缺陷修复见 [INTERNAL_HISTORY](INTERNAL_HISTORY.md)；
-> 当前版本有什么、怎么升级见 [RELEASE_NOTES_v0.1.0](RELEASE_NOTES_v0.1.0.md)。
+> 当前版本有什么、怎么升级见 [v0.1.0 更新报告](releases/v0.1.0/RELEASE_NOTES.md)。
 
 **目录**
 
@@ -302,7 +302,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 - **设计**：全部收敛在这份 `DESIGN.md` 的 13 节里，不再有第二份设计文档。
 - **实现**：`engine/`（Python 引擎，可脱离宿主单测）与 `plugin/dsh-attune-memory/`（宿主插件）。
 - **过程**：每个版本为什么改、踩了什么坑、缺陷现场 → [INTERNAL_HISTORY](INTERNAL_HISTORY.md)。
-- **版本**：这一版有什么变化、怎么升级、已知限制 → [RELEASE_NOTES_v0.1.0](RELEASE_NOTES_v0.1.0.md)。
+- **版本**：这一版有什么变化、怎么升级、已知限制 → [v0.1.0 更新报告](releases/v0.1.0/RELEASE_NOTES.md)。
 
 
 ## 2. 原理详解
