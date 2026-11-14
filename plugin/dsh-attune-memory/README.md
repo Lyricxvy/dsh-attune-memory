@@ -34,7 +34,7 @@
 | `engineDir` | 是 | — | 引擎目录（含 `attune_memory/` 包），也支持 `DSH_ATTUNE_MEMORY_ENGINE_DIR` |
 | `dbPath` | 否 | `$DSH_HOME/attune-memory/memory.db` | SQLite 文件；自动建目录 |
 | `python` | 否 | `python` | 解释器路径，也支持 `DSH_ATTUNE_MEMORY_PYTHON` |
-| `engineModule` | 否 | `attune_memory.rpc` | Python 模块名；源码树（包名 `memory`）跑测试时传 `attune_memory.rpc`，也可用 `DSH_ATTUNE_MEMORY_ENGINE_MODULE` |
+| `engineModule` | 否 | `attune_memory.rpc` | Python 模块名。发布树的包目录叫 `attune_memory`、源码树里叫 `memory`，模块名就是「包目录名 + `.rpc`」；测试会自动探测，手工起引擎时用 `DSH_ATTUNE_MEMORY_ENGINE_MODULE` 覆盖 |
 | `timeoutMs` | 否 | `5000` | 单次 RPC 超时 |
 | `debug` | 否 | `false` | 打印每次 RPC |
 
