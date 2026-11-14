@@ -29,9 +29,9 @@
 
 
 - 版本：V1 设计基线
-- 状态：P0 产出，后续 P0.5–P11 全部以此为准
+- 状态：设计原则阶段产出；后续各阶段都以此为准
 - 适用对象：DeepSeek Harness（下称"宿主"）的长期记忆子系统
-- 阅读顺序：本文 → `ADR.md` → `CURRENT_ENVIRONMENT_ANALYSIS.md` → `MEMORY_SCHEMA_V1.md` → 其余
+- 阅读顺序：本文 → §11 → §8 → §3 → 其余
 
 ---
 
@@ -39,7 +39,7 @@
 
 在写任何一行 SQL、任何一行接入代码之前，先把**什么是 Memory、它为什么存在、它不该做什么**钉死。原因是记忆系统最容易的失败方式不是"实现不出来"，而是"实现出来了，但它把对话记录搬进数据库、每轮无脑注入、越用越脏"，最后成为上下文污染源而不是能力增强。
 
-本文只定义**概念与边界**，不定义表结构（P2）、不定义检索算法（P5）、不涉及宿主机制（P1）。
+本文只定义**概念与边界**，不定义表结构（见 §3）、不定义检索算法（见 §6）、不涉及宿主机制（见 §8）。
 
 ---
 
@@ -146,7 +146,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 3. 历史的检索只能靠相似度，Memory 的检索可以靠结构（主体、领域、状态、时间）。
 
 **对实现的约束：**
-- 记忆写入必须经过**提炼**（P3 的 Extractor → Candidate → 决策链），不允许"把消息整段落库"。
+- 记忆写入必须经过**提炼**（写入管线的 Extractor → Candidate → 决策链），不允许"把消息整段落库"。
 - 每条记忆必须能指回来源消息（`source_message_id`），但**不复制**消息正文之外的上下文。
 - 大多数消息**不应该**产生任何记忆。默认动作是 IGNORE，不是 ADD。
 
@@ -169,9 +169,9 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 | 可纠正 Correctable | 用户能看见、能改、能删，系统能感知矛盾 | 悄悄覆盖，无从查证 |
 
 **对实现的约束：**
-- 写入侧默认 IGNORE；有明确的长期价值判据才 ADD（P3）。
-- 读取侧设**硬预算**：条数上限 + token 上限，宁可少注入（P4）。
-- 提供 `explain` 与 `forget`：任何一条注入内容都能被追溯到"为什么它在这"（P6、P9）。
+- 写入侧默认 IGNORE；有明确的长期价值判据才 ADD（见 §4）。
+- 读取侧设**硬预算**：条数上限 + token 上限，宁可少注入（见 §5）。
+- 提供 `explain` 与 `forget`：任何一条注入内容都能被追溯到"为什么它在这"（见 §7、§9）。
 
 #### 哲学 3：Memory ≠ 单纯向量库
 
@@ -185,8 +185,8 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 
 **对实现的约束：**
 - V1 检索链路：结构化过滤（`user_id` / `status` / `type` / `domain_key` / `scope` / 时间窗）→ 词法匹配（关键词/子串）→ 打分排序 → Top-K。
-- 中文必须能工作：V1 采用**关键词切分 + 子串匹配**（具体方案见 P5）。Bigram / FTS5 记入 V2。
-- Embedding 与语义检索明确记入 `V2_V3_RESERVED.md`，V1 不实现、不预留抽象层（避免"为未来设计"导致复杂度提前膨胀）。
+- 中文必须能工作：V1 采用**关键词切分 + 子串匹配**（具体方案见 §6）。Bigram / FTS5 记入 V2。
+- Embedding 与语义检索明确记入 §13，V1 不实现、不预留抽象层（避免"为未来设计"导致复杂度提前膨胀）。
 
 #### 哲学 4：最终目标不是保存历史，而是持续维护 User Model
 
@@ -198,9 +198,9 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 3. 一旦目标定为"维护模型"，写操作的重心就从 ADD 转向 UPDATE / SUPERSEDE，冲突处理就从"避免"变成"必须正确处理"。
 
 **对实现的约束：**
-- 写管线以"是否改变了 User Model / Interaction Model"为决策轴，而不是"是否值得记录"（P3）。
-- 状态类条目（`state`）必须有 `valid_until` 与显式的 SUPERSEDE 路径；旧条目不删除，标记 `superseded`（P6）。
-- `read_for_context` 的输出必须能回答"当前有效的用户模型是什么"，而不只是"相关记忆列表"（P4、P7）。
+- 写管线以"是否改变了 User Model / Interaction Model"为决策轴，而不是"是否值得记录"（见 §4）。
+- 状态类条目（`state`）必须有 `valid_until` 与显式的 SUPERSEDE 路径；旧条目不删除，标记 `superseded`（见 §7）。
+- `read_for_context` 的输出必须能回答"当前有效的用户模型是什么"，而不只是"相关记忆列表"（见 §5、§8）。
 
 #### 哲学 5：Interaction Model 是灵魂
 
@@ -215,7 +215,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 - `profile` 下的 `interaction` subtype 是一等公民，与身份信息同级建模。
 - 必须支持 scope（约束 D），否则全局泄漏。
 - `injection_policy` 上，`interaction` 条目倾向 `always`（global 且高置信）或 `contextual`（domain/task 绑定）。
-- 评估套件必须专门覆盖 scope 隔离（P10 用例 E）。
+- 评估套件必须专门覆盖 scope 隔离（见 §10 用例 E）。
 
 ---
 
@@ -224,7 +224,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 #### 约束 A：User Model 是逻辑视图，查询时组合，不做数据副本
 
 **禁止：** `user_model` 表、`user_profile` 快照表、把 profile 条目同步写进第二张表、把 User Model 序列化成一段文本存起来。
-**要求：** 任何"用户模型"输出都是对 Memory 表的一次查询 + 组合（P4 的 Router 输出、P7 的 `read_for_context`、P9 的 `list`）。
+**要求：** 任何"用户模型"输出都是对 Memory 表的一次查询 + 组合（读取管线的 Router 输出、引擎层的 `read_for_context`、管理的 `list`）。
 **判定方法：** 删掉除 Memory 主表以外的所有缓存/副本，系统行为不变。
 **为什么：** 副本必然与主数据漂移；漂移后的"用户模型"是第二个真相源，纠错时无法确定以谁为准。
 
@@ -238,13 +238,13 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 #### 约束 C：冲突是 feature，不是 bug，不许悄悄覆盖
 
 **要求：** 检测到与现有记忆矛盾时，必须走显式路径：`SUPERSEDE`（断言被新事实取代，旧条目保留 + `valid_until` + `superseded_by`）或 `UPDATE`（同一条目表述修正，保留修订记录）。禁止在不留痕的情况下改写 `content`。
-**必须能回答：** 变了什么、什么时候变、被什么触发、旧版是什么、新版是什么（P6 可解释性）。
+**必须能回答：** 变了什么、什么时候变、被什么触发、旧版是什么、新版是什么（见 §7）。
 **为什么：** 用户的观念变化本身是最有价值的信号（哲学 4）；悄悄覆盖既丢失信息，又让系统无法解释自己的行为。
 
 #### 约束 D：Interaction Model 支持 scope ∈ {global, domain, task}
 
 **要求：** `scope` 是 `interaction` 条目的必填字段；检索与注入必须按 scope 过滤（`task` 场景下用当前任务标识匹配，V1 简化为"当前会话/工作区"）。
-**判定：** 存在 scope=study.math 的"从零讲"要求时，写文案的对话不得注入它（P10 用例 E）。
+**判定：** 存在 scope=study.math 的"从零讲"要求时，写文案的对话不得注入它（见 §10 用例 E）。
 
 ---
 
@@ -266,7 +266,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 
 | 拒绝项 | 为什么现在不做 | 何时重新考虑 |
 |---|---|---|
-| Embedding / 向量检索 | 结构维度比语义相似度更重要；引入模型依赖与索引迁移成本；可解释性差（哲学 3） | V2（记入 `V2_V3_RESERVED.md`） |
+| Embedding / 向量检索 | 结构维度比语义相似度更重要；引入模型依赖与索引迁移成本；可解释性差（哲学 3） | V2（记入 §13） |
 | 中文 Bigram / FTS5 全文索引 | V1 的量级（数百条）用关键词+子串足够；FTS5 分词配置是独立的复杂度来源 | V2 |
 | Memory Graph / 关系遍历 | V1 没有足够的边密度支撑图查询；关系感知检索是图才行的问题 | V3 |
 | 自动人格推断（从行为推测性格/动机） | 推断错误不可纠正且会被当作事实放大，直接违反哲学 2 的"准确" | 不在路线图内（需显式同意机制才可能） |
@@ -276,8 +276,8 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 | 存全量聊天记录作为记忆 | 哲学 1 的直接违反；宿主已负责历史持久化 | 永不 |
 | 多用户 / 多租户 SaaS 化 | 单机单用户；表保留 `user_id` 字段以便未来，但不实现鉴权与隔离逻辑 | 产品化时 |
 | 跨设备同步 / 云端记忆 | 与 V1 的本地 SQLite 定位冲突 | V3 之后，需独立 ADR |
-| UI 记忆图谱可视化 | 可视化对"准确性"没有贡献；P9 只做列表/详情/编辑/删除/解释 | V3 |
-| 让 LLM 直接写库 | 必须经过 Memory Manager 的显式决策（P3），否则等于把质量控制交给随机性 | 永不 |
+| UI 记忆图谱可视化 | 可视化对"准确性"没有贡献；管理只做列表/详情/编辑/删除/解释 | V3 |
+| 让 LLM 直接写库 | 必须经过 Memory Manager 的显式决策（见 §4），否则等于把质量控制交给随机性 | 永不 |
 | 把全量记忆塞进 system prompt | 违反哲学 2 的预算原则；只注入预算内的 Top-K | 永不 |
 
 ---
@@ -297,24 +297,12 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 
 ---
 
-### 7. 下游文档映射
+### 7. 本文与其他文档的关系
 
-| 本文概念 | 落地文档 |
-|---|---|
-| 概念定义、五哲学、四约束 | 本文 |
-| 重大取舍的决策记录 | `ADR.md`（P0.5） |
-| 宿主接入点、生命周期、外部插件调研 | `CURRENT_ENVIRONMENT_ANALYSIS.md`、`ADOPTION_DECISION_TABLE.md`、`UNKNOWN_LIST.md`（P1） |
-| 字段、索引、示例、种子记忆 | `MEMORY_SCHEMA_V1.md`（P2） |
-| 写操作与决策链 | `MEMORY_WRITE_PIPELINE.md`（P3） |
-| 读策略与预算 | `MEMORY_READ_PIPELINE.md`（P4） |
-| 检索与打分 | `MEMORY_RETRIEVAL_V1.md`（P5） |
-| 状态机与可解释性 | `MEMORY_LIFECYCLE.md`（P6） |
-| 引擎实现与测试 | `memory_engine/`（P7） |
-| 宿主接入实现 | `integration/`（P8） |
-| 管理接口 | `MEMORY_MANAGEMENT.md`（P9） |
-| 评估 | `MEMORY_EVAL_SUITE.md`（P10） |
-| 未来边界 | `V2_V3_RESERVED.md` |
-
+- **设计**：全部收敛在这份 `DESIGN.md` 的 13 节里，不再有第二份设计文档。
+- **实现**：`engine/`（Python 引擎，可脱离宿主单测）与 `plugin/dsh-attune-memory/`（宿主插件）。
+- **过程**：每个版本为什么改、踩了什么坑、缺陷现场 → [INTERNAL_HISTORY](INTERNAL_HISTORY.md)。
+- **版本**：这一版有什么变化、怎么升级、已知限制 → [RELEASE_NOTES_v0.1.0](RELEASE_NOTES_v0.1.0.md)。
 
 
 ## 2. 原理详解
@@ -325,7 +313,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 > 版本：v1.1（2026-11-14）
 > 对应代码：`engine/`（Python 3.11，纯标准库）+ `plugin/dsh-attune-memory/`（DSH 插件）
 > 本报告讲**原理**：每个机制为什么存在、靠什么实现、在什么位置生效、失效时会发生什么。
-> 想要"怎么装、怎么用"看 `README.md` / `INSTALL.md`；想要"当时为什么这么选"看 `ADR.md`。
+> 想要"怎么装、怎么用"看 `README.md` / `INSTALL.md`；想要"当时为什么这么选"看 §11。
 
 ---
 
@@ -377,7 +365,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 
 | 你想知道 | 读哪几节 | 大约 |
 |---|---|---|
-| 它到底怎么运转（15 分钟） | §0 → §5.1（三通道）→ §6.4（六因子）→ §14（完整时间线） | 15 分钟 |
+| 它到底怎么运转（15 分钟） | §2 开头 → §5.1（三通道）→ §6.4（六因子）→ §2 第 14 小节（完整交互时间线） | 15 分钟 |
 | 为什么这样设计（评审/选型） | §1（失效模式）→ §2（对象模型）→ §12（缺陷→原理）→ §13（局限） | 30 分钟 |
 | 我要改代码 | §3（表结构）→ §4（写入）→ §6（检索）→ §8（宿主接线）→ §10（不变量） | 40 分钟 |
 
@@ -439,7 +427,7 @@ User Model 回答的问题是"这个用户是谁、他要什么、他处在什�
 
 > 删掉除了 `memories` / `memory_change` / `memory_meta` 之外的所有缓存与副本，系统行为不变。
 
-这条我在真实库上验证过：稳定块里的 id、相关块里的 id 都来自同一张表；软删一条记忆后，稳定块下一次重算立刻不含它（`HOST_INTEGRATION.md` §"约束 A 验证"）。
+这条我在真实库上验证过：稳定块里的 id、相关块里的 id 都来自同一张表；软删一条记忆后，稳定块下一次重算立刻不含它（§8 "约束 A 验证"）。
 
 为什么不做"画像表"？因为一旦落盘，就必须回答两个没有好答案的问题：**谁负责同步？**（双写必然漂移）和**冲突时以谁为准？**（无法回答）。视图方案把这两个问题从"数据一致性"降级成"每次查询重算"，代价是每次多花几毫秒。
 
@@ -561,7 +549,7 @@ slot = (subject_type, subject_name, type, subtype, domain_key)
 这是全库最容易混的一处，必须分开：
 
 ```
-现实世界的有效期                    记录在系统里的时间
+现实世界的有效期 记录在系统里的时间
 valid_from ──── valid_until         created_at ──── updated_at
 （这件事什么时候成立）                （这行什么时候写的）
 ```
@@ -686,7 +674,7 @@ complementary：segments 有交集，但既不等价也不互斥
 unrelated    ：以上都不满足
 ```
 
-为什么不用 Embedding？V1 的判据必须**可解释、可复现、零依赖**：用户问"为什么这两条被判成冲突"，必须能回答"因为它们分别说了'需要'和'不需要'"。语义相似度答不了这个问题（V2 再上，见 `V2_V3_RESERVED.md`）。
+为什么不用 Embedding？V1 的判据必须**可解释、可复现、零依赖**：用户问"为什么这两条被判成冲突"，必须能回答"因为它们分别说了'需要'和'不需要'"。语义相似度答不了这个问题（V2 再上，见 §13）。
 
 极性词表刻意只有 12 对，且**不含"是/不是"**——中文里"是"到处都是，加了它全库都是冲突。
 
@@ -897,7 +885,7 @@ user/message     | seq=86 kind=user
 ```
 ① 结构化过滤（SQL）        候选 ≤ 200 条
       ↓  status / policy / subtype / 过期 / task_key / domain
-② 中文切分 + 两路匹配      每个候选得到 raw relevance
+② 中文切分 + 两路匹配 每个候选得到 raw relevance
       ↓  词表路（精确）+ 片段路（子串）
 ③ 六因子打分               score = rel × conf × imp × fresh × ctx × pen
       ↓
@@ -1158,7 +1146,7 @@ turn()
 
 本机的实际配置：ACP 把 `compaction-basic` 关成 `auto: false` 并禁掉 `/compact`，所以内置压缩**根本不会跑**；而 ACP 的压缩对 DSH 完全不可见。所以"等通知"这条路是死路，"放在 system prompt"才是唯一不依赖通知的位置。
 
-残留风险：如果代理连 system 字段也压缩，则无解——记录在 `UNKNOWN_LIST.md` U-003。
+残留风险：如果代理连 system 字段也压缩，则无解——记录在 §13 U-003。
 
 #### 8.4 fail-open 的边界
 
@@ -1349,8 +1337,7 @@ python -m attune_memory.memctl --db <path> explain <id>
 cd engine; python tests/verify_delivery.py
 ```
 
-配套文档：`MEMORY_SYSTEM_DESIGN_PRINCIPLES.md`（哲学与边界）、`MEMORY_SCHEMA_V1.md`（字段定义）、`MEMORY_WRITE_PIPELINE.md`、`MEMORY_READ_PIPELINE.md`、`MEMORY_RETRIEVAL_V1.md`、`MEMORY_LIFECYCLE.md`、`HOST_INTEGRATION.md`、`ADR.md`（34 条决策记录）、`DEFECT_LOG.md`（11 个缺陷的现场）、`V2_V3_RESERVED.md`。
-
+配套阅读：§1（哲学与边界）、§3（字段定义）、§11（34 条决策记录）、§13（边界与未决项）；11 个缺陷的现场见 [INTERNAL_HISTORY](INTERNAL_HISTORY.md) §2。
 
 
 ## 3. 数据模型与 schema
@@ -1358,9 +1345,9 @@ cd engine; python tests/verify_delivery.py
 四类语义角色、24 字段主表、主体防坍缩、索引与不变量。
 
 
-> 上游：`MEMORY_SYSTEM_DESIGN_PRINCIPLES.md`（P0）、`ADR.md`（P0.5）、`CURRENT_ENVIRONMENT_ANALYSIS.md` / `ADOPTION_DECISION_TABLE.md`（P1）。
-> 本文只定义**数据模型**，不写检索算法（P5）、不写写入决策（P3）、不写注入策略细节（P4）。
-> 唯一实现约束：P7 的 Engine 必须能仅凭本文建出表、写出数据、回答 `explain`。
+> 上游：§1、§11、§8 / §12。
+> 本文只定义**数据模型**，不写检索算法（见 §6）、不写写入决策（见 §4）、不写注入策略细节（见 §5）。
+> 唯一实现约束：引擎层的 Engine 必须能仅凭本文建出表、写出数据、回答 `explain`。
 
 ---
 
@@ -1437,7 +1424,7 @@ cd engine; python tests/verify_delivery.py
 - 「用户是工科生」→ 没有终点，是 `profile/identity`。
 - 「用户 2024 年考过一次研」→ 已结束的具体事件，是 `episodic`。
 
-**硬规则**：`type='state'` 必须有 `valid_from`；`valid_until` 允许为空（表示"至今有效"），但一旦有了新状态，旧状态必须写 `valid_until` 并置 `status='superseded'`（P3 的 SUPERSEDE）。
+**硬规则**：`type='state'` 必须有 `valid_from`；`valid_until` 允许为空（表示"至今有效"），但一旦有了新状态，旧状态必须写 `valid_until` 并置 `status='superseded'`（写入管线的 SUPERSEDE）。
 
 #### 1.4 `episodic` — 具体发生过的事
 
@@ -1496,14 +1483,14 @@ cd engine; python tests/verify_delivery.py
 | `subject_type` | NOT NULL, ∈ `{user, person, project, org, other}` | 这条事实**属于谁** |
 | `subject_name` | 可空；`subject_type='user'` 时固定为 `用户`；其它情况写具体名字/标识 | 消歧用（"朋友"可能有多个 → `朋友-小王`） |
 
-**判定顺序（P3 的 Subject Identification 步骤照此实现）**：
+**判定顺序（写入管线的 Subject Identification 步骤照此实现）**：
 1. 句子里主语是"我/我的" 且修饰的是**用户自身属性** → `user`
 2. 主语是第三方人（朋友/同事/我妈）→ `person` + 具体称呼
 3. 主语是项目/仓库/产品 → `project` + 名称
 4. 主语是公司/组织/团队 → `org` + 名称
 5. 说不清 → `other` + 原句主语词
 
-**关键规则**：`subject_type != 'user'` 的记忆，**永远不参与** User Model 查询，也不允许 `injection_policy='always'`（别人的偏好不该每轮注入）。这条写成数据库触发器或应用层断言，二选一，P7 定。
+**关键规则**：`subject_type != 'user'` 的记忆，**永远不参与** User Model 查询，也不允许 `injection_policy='always'`（别人的偏好不该每轮注入）。这条写成数据库触发器或应用层断言，二选一，引擎层定。
 
 **真实例**：
 - 用户说"我朋友小王喜欢红色" → `subject_type=person, subject_name=朋友-小王, type=profile, subtype=preference, content="用户的朋友小王喜欢红色"`
@@ -1534,7 +1521,7 @@ cd engine; python tests/verify_delivery.py
 | 15 | `source_message_id` | TEXT | NULL | 来源消息 id（会话事件 seq 或消息 id）→ 来源追踪、可回溯原话 |
 | 16 | `source_conversation_id` | TEXT | NULL | 来源会话 id（DSH `session.id`）→ "这条是哪次聊出来的" |
 | 17 | `valid_from` | TEXT | NOT NULL | ISO8601 UTC。state 必填且是语义核心；其它类型填首次成立时间 |
-| 18 | `valid_until` | TEXT | NULL | 失效时间。NULL = 至今有效。**superseded 时必须写**（P6） |
+| 18 | `valid_until` | TEXT | NULL | 失效时间。NULL = 至今有效。**superseded 时必须写**（见 §7） |
 | 19 | `superseded_by` | TEXT | NULL, 自引用 | 指向取代它的那条 id → 追溯链；配合 `memory_change` 回答"为什么变" |
 | 20 | `created_at` | TEXT | NOT NULL | 写入时间（UTC ISO8601） |
 | 21 | `updated_at` | TEXT | NOT NULL | 最后一次变更时间 |
@@ -1550,7 +1537,7 @@ cd engine; python tests/verify_delivery.py
 
 #### 4.1 辅助表
 
-**`memory_change`** — 变更时间轴（可解释性的物质基础，P6 用）
+**`memory_change`** — 变更时间轴（可解释性的物质基础，生命周期用）
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -1590,7 +1577,7 @@ cd engine; python tests/verify_delivery.py
 
 #### 5.2 injection_policy：四级
 
-| 级别 | 语义 | 准入条件（P4 细化） | 例子 |
+| 级别 | 语义 | 准入条件（读取管线细化） | 例子 |
 | --- | --- | --- | --- |
 | `always` | 每轮都进上下文 | Stable ∩ 高置信 ∩ 跨任务有用 ∩ 不污染，**宁少勿多** | 「用中文回答」「先思路后步骤」 |
 | `contextual` | 按 `domain_key` / `scope` 匹配当前上下文后进 | 领域/状态匹配上才进 | 「备考科目是数学一」 |
@@ -1625,11 +1612,11 @@ cd engine; python tests/verify_delivery.py
 - `scope='domain'` → `domain_key` **必须**非空（否则这条 scope 等于没写）
 - `scope='task'` → `domain_key` 可空，但 `metadata.task_key` 必须非空
 
-这三条写成应用层不变量校验，P7 的 `add()` 要拒收违反者。
+这三条写成应用层不变量校验，引擎层的 `add()` 要拒收违反者。
 
 ---
 
-### 7. 状态与历史（为 P6 留好接口）
+### 7. 状态与历史（为 生命周期留好接口）
 
 **`status` 四值**：`active` / `superseded` / `archived` / `deleted`。
 
@@ -1637,9 +1624,9 @@ cd engine; python tests/verify_delivery.py
 - `created` = 行首次落库的瞬间，由 `created_at` + `memory_change(action='add')` 表达。
 - `updated` = 行内容被修正的瞬间，由 `updated_at` + `memory_change(action='update')` 表达。
 
-理由：把"刚创建"和"更新过"做成 status 值，会让每次写入都必须先写一个瞬时状态再改回来（两阶段写），而它们对**检索**没有任何影响——检索只关心"现在还有效吗"。P6 的状态机会画出六个节点，但**持久化的枚举是四个**，这一点必须在 P6 里显式说明，避免和本文冲突。
+理由：把"刚创建"和"更新过"做成 status 值，会让每次写入都必须先写一个瞬时状态再改回来（两阶段写），而它们对**检索**没有任何影响——检索只关心"现在还有效吗"。生命周期的状态机会画出六个节点，但**持久化的枚举是四个**，这一点必须在 生命周期里显式说明，避免和本文冲突。
 
-**不变式**（P7 的测试要覆盖）：
+**不变式**（引擎层的测试要覆盖）：
 1. `status='superseded'` ⇒ `superseded_by` 非空 且 `valid_until` 非空
 2. `superseded_by` 指向的必须是 `status IN ('active','archived')` 的行（不许指向另一个 superseded，链条要短）
 3. `status='deleted'` ⇒ 不可被检索命中，但行仍在（`purge` 才真删）
@@ -1650,7 +1637,7 @@ cd engine; python tests/verify_delivery.py
 
 ### 8. 索引（按检索路径设计，不是按字段美观）
 
-检索路径来自 P4/P5：① 取 always 集合；② 按 domain 取 contextual；③ 按关键词/主体/状态查；④ 追溯链；⑤ 过期扫描。
+检索路径来自 读取管线/检索：① 取 always 集合；② 按 domain 取 contextual；③ 按关键词/主体/状态查；④ 追溯链；⑤ 过期扫描。
 
 | 索引名 | 列 | 服务的查询 |
 | --- | --- | --- |
@@ -1686,11 +1673,11 @@ cd engine; python tests/verify_delivery.py
 2. **窄 scope 的代价不对称**。宽了只是多注入一条（预算可控，一条 20 字）；窄了是"该生效时没生效"，而这正是记忆系统最伤信任的失败模式。
 3. **保留了收窄的路径**。如果后续用户说"写代码时不用讲思路，直接给代码"，那不是修改 S2，而是**新增**一条 `scope=domain, domain_key=code`、内容为"写代码时直接给实现"的 interaction 记忆，检索时 `domain` 优先于 `global`，并显式标注覆盖关系（约束 C）。这样两个偏好都在，历史可解释。
 
-**反向条件**（写进文档，便于 P11 复盘）：若评估发现 `always` 层预算被 interaction 挤爆（>30% token），则把 S2/S3 降为 `contextual` + `domain_key=study`，并把这一步记进 ADR。
+**反向条件**（写进文档，便于 调优复盘）：若评估发现 `always` 层预算被 interaction 挤爆（>30% token），则把 S2/S3 降为 `contextual` + `domain_key=study`，并把这一步记进 ADR。
 
 ---
 
-### 10. 完整行示例（P7 的种子数据就用这些）
+### 10. 完整行示例（引擎层的种子数据就用这些）
 
 #### 示例 1：S2 —— 讲法偏好（always 层）
 
@@ -1818,7 +1805,7 @@ cd engine; python tests/verify_delivery.py
 
 ---
 
-### 11. 约束 A 的自检清单（P7/P8 各跑一次）
+### 11. 约束 A 的自检清单（引擎层/宿主层 各跑一次）
 
 | 检查 | 通过标准 |
 | --- | --- |
@@ -1837,7 +1824,7 @@ cd engine; python tests/verify_delivery.py
 | FTS5 虚拟表 / bigram 索引列 | V2 | 任务书 V2 范围；V1 用 LIKE + 结构过滤 |
 | 记忆关系表（`memory_edge`） | V3 | Memory Graph 是 V3 |
 | 类型化半衰期列 | V2 | V1 用代码常量 |
-| 冲突检测结果表 | V2 | V1 只在写入决策时做同槽位显式比对（P3） |
+| 冲突检测结果表 | V2 | V1 只在写入决策时做同槽位显式比对（见 §4） |
 | `pinned` / `weight` / `decay_score` | — | 分别被 injection_policy / importance / 查询期计算替代 |
 
 ---
@@ -1846,12 +1833,11 @@ cd engine; python tests/verify_delivery.py
 
 | 下游 | 依赖本文的哪些部分 |
 | --- | --- |
-| P3 写管线 | §3 主体判定顺序、§4 字段约束、§5.2 四级语义、§7 不变式、`memory_change` 的 action 词表 |
-| P4 读管线 | §1.5 默认 policy、§5.3 四种组合、§6 scope/domain 分工 |
-| P5 检索 | §8 索引与检索路径、§5.1 importance 映射、`keywords` 列 |
-| P6 生命周期 | §7 四值 + 六节点映射、`memory_change` 表 |
-| P7 Engine | §4 全部字段与约束、§7 五条不变式、§8 索引、§10 示例即种子数据 |
-
+| 写入管线写管线 | §3 主体判定顺序、§4 字段约束、§5.2 四级语义、§7 不变式、`memory_change` 的 action 词表 |
+| 读取管线读管线 | §1.5 默认 policy、§5.3 四种组合、§6 scope/domain 分工 |
+| 检索检索 | §8 索引与检索路径、§5.1 importance 映射、`keywords` 列 |
+| 生命周期生命周期 | §7 四值 + 六节点映射、`memory_change` 表 |
+| 引擎（Engine） | §4 全部字段与约束、§7 五条不变式、§8 索引、§10 示例即种子数据 |
 
 
 ## 4. 写入管线
@@ -1859,8 +1845,8 @@ cd engine; python tests/verify_delivery.py
 候选从哪来、价值闸门、槽位、九条决策表、UPDATE/MERGE/SUPERSEDE 的边界。
 
 
-> 上游：`MEMORY_SCHEMA_V1.md`（字段与不变式）、`CURRENT_ENVIRONMENT_ANALYSIS.md` §4（写点选型）、`ADOPTION_DECISION_TABLE.md`（B1/B3/B5/B6/D1）。
-> 本文只定义**一条新信息如何变成一条（或零条）记忆**。检索打分见 P5，注入见 P4，状态机全貌见 P6。
+> 上游：§3（字段与不变式）、§8 §4（写点选型）、§12（B1/B3/B5/B6/D1）。
+> 本文只定义**一条新信息如何变成一条（或零条）记忆**。检索打分见 §6，注入见 §5，状态机全貌见 §7。
 
 ---
 
@@ -1910,7 +1896,7 @@ cd engine; python tests/verify_delivery.py
 
 **为什么还要入口 B**：用户常常不会说"记住这件事"，而是顺口说"我最近在备考"。全靠模型自觉会漏。入口 B 只处理**句式高度确定**的一小撮（见 §1.2），命中率低但误报也低。
 
-#### 1.1 入口 A：工具契约（P7/P8 实现）
+#### 1.1 入口 A：工具契约（引擎层/宿主层 实现）
 
 | 工具 | 必填 | 语义 | 引擎行为 |
 | --- | --- | --- | --- |
@@ -1953,7 +1939,7 @@ cd engine; python tests/verify_delivery.py
 | **一句话一个事实** | "用户是能动专业的，考研考数一，喜欢先讲思路" | 拆成三条 |
 | **陈述态、无时态歧义** | "用户可能要考研" | "用户在备考考研（2026-12 初试）" |
 
-引擎要**机械可检**的只有第 1、2 条：`content` 里出现"他/她/它/这个/那个/上面/刚才"等指代词 → 拒收并回告模型补全；`content` 长度 > 200 字或含 ≥3 个逗号分句 → 要求拆分。语义质量只能靠提示词约束 + P10 评估兜底。
+引擎要**机械可检**的只有第 1、2 条：`content` 里出现"他/她/它/这个/那个/上面/刚才"等指代词 → 拒收并回告模型补全；`content` 长度 > 200 字或含 ≥3 个逗号分句 → 要求拆分。语义质量只能靠提示词约束 + 评估评估兜底。
 
 #### 2.2 槽位（slot）——后面所有决策的坐标系
 
@@ -1965,17 +1951,17 @@ slot = (subject_type, subject_name, type, subtype, domain_key)
 
 这条限制很重要：跨槽位比对（比如拿 `domain` 的约定去比 `profile` 的偏好）产生的"冲突"几乎都是噪声，参考实现 `dsh-local-memory` 的 `insight.js` 也只在同质条目间比对。
 
-#### 2.3 Subject Identification（照 P2 §3 的顺序执行）
+#### 2.3 Subject Identification（照 数据模型 §3 的顺序执行）
 
 引擎在写入前做一次**机械校验**，防止最常见的一类污染：
 
 ```python
-# 伪代码，P7 落地
+# 伪代码，引擎层落地
 THIRD_PARTY = ["我朋友", "我同事", "我妈", "我爸", "我老板", "我对象", "我室友", "我们组"]
 if candidate.subject_type == "user" and any(p in candidate.content for p in THIRD_PARTY):
     reject("content 提到第三方主体，subject_type 不能是 user")   # 除非显式声明 subject_type
 if candidate.subject_type != "user" and policy == "always":
-    reject("非用户主体的记忆不允许 always 注入")                  # P2 §3 硬规则
+    reject("非用户主体的记忆不允许 always 注入")                  # 数据模型 §3 硬规则
 ```
 
 `"我朋友喜欢红色"` → 必须落成 `subject_type='person', subject_name='朋友-小王'`；拿不到名字就 `subject_name='朋友'` 并在 `metadata` 标 `ambiguous_subject: true`，`injection_policy` 强制降为 `on_demand`。
@@ -2008,7 +1994,7 @@ if candidate.subject_type != "user" and policy == "always":
 
 **V4（可派生性）值得单独强调**：这是记忆系统最容易犯的"贪心"错误——把代码库里能查到的东西再存一遍，结果版本一升就全是过期信息。判据是"**从工作区能查到吗**"，而不是"重要吗"。但"**为什么这样选**"永远不可派生，必须记。
 
-**IGNORE 也要留痕**（不落 `memories`，写日志）：`{candidate, reason, at}`。用途：P10 评估要证明"没乱存"，P11 调优要看被误杀的是什么。日志是 `logs/ignore.jsonl`，不进数据库（它不属于记忆）。
+**IGNORE 也要留痕**（不落 `memories`，写日志）：`{candidate, reason, at}`。用途：评估评估要证明"没乱存"，调优调优要看被误杀的是什么。日志是 `logs/ignore.jsonl`，不进数据库（它不属于记忆）。
 
 ---
 
@@ -2050,9 +2036,9 @@ if candidate.subject_type != "user" and policy == "always":
 **极性词对（V1 只收这些，照抄 `dsh-local-memory` 的克制做法）**：
 
 ```
-需要 / 不需要    支持 / 不支持    启用 / 禁用    开启 / 关闭
-保留 / 删除      加上 / 去掉      使用 / 不使用  成功 / 失败
-可用 / 不可用    推荐 / 不推荐    必须 / 禁止    考 / 不考
+需要 / 不需要 支持 / 不支持 启用 / 禁用 开启 / 关闭
+保留 / 删除 加上 / 去掉 使用 / 不使用 成功 / 失败
+可用 / 不可用 推荐 / 不推荐 必须 / 禁止 考 / 不考
 ```
 
 **关键值槽**（同一属性上的不同取值）：
@@ -2081,14 +2067,14 @@ if candidate.subject_type != "user" and policy == "always":
 | 8 | 同槽位存在**互补**条目且总数 ≥ 3 | **MERGE**（提议） | 先返回"建议合并"，**不自动执行**；等显式 `memory_merge` 或用户确认 |
 | 9 | 其余 | **ADD** | 正常新增 |
 
-> **第 8 行的落地细节（P7 实现时确定）**：这条仍要**先把新条目 ADD 进去**，再在返回值里附 `merge_suggestion`（`{ids:[...], hint:"..."}`）。原因：提议合并不该同时拒绝写入——否则模型没理会建议的那一轮，新事实就永久丢了。所以顺序是"ADD + 建议"，不是"先卡住等确认"。红线仍然守住：**引用这些 id 的 `memory_merge` 必须显式发起**，引擎不会自己合并。
+> **第 8 行的落地细节（引擎层实现时确定）**：这条仍要**先把新条目 ADD 进去**，再在返回值里附 `merge_suggestion`（`{ids:[...], hint:"..."}`）。原因：提议合并不该同时拒绝写入——否则模型没理会建议的那一轮，新事实就永久丢了。所以顺序是"ADD + 建议"，不是"先卡住等确认"。红线仍然守住：**引用这些 id 的 `memory_merge` 必须显式发起**，引擎不会自己合并。
 
 **优先级说明（为什么这个顺序）**：
 - 删除压过一切——用户说"忘掉这个"，不能因为我"觉得重要"就留下。
 - 降级（2）在 IGNORE 之前：事实有效，只是不能每轮注入，属于"修正策略"而非"拒绝写入"。
 - 值门（3）在查重之前：先判断该不该记，再判断记成什么。反过来的话，一条垃圾内容因为"和现有条目重复"被 TOUCH，等于给垃圾盖章。
 - 显式信号（5/6）优先于自动互斥判定（7）：模型说了"这是取代"，就按取代走，避免它和引擎各判一半导致两条并存。
-- MERGE（8）只提议不执行：不可逆自动归并是红线。提议的落地形式是工具返回值里的 `merge_suggestion`，外加 P9 管理界面的"合并"按钮。
+- MERGE（8）只提议不执行：不可逆自动归并是红线。提议的落地形式是工具返回值里的 `merge_suggestion`，外加 管理管理界面的"合并"按钮。
 
 #### 5.4 UPDATE 与 MERGE 的严格区分
 
@@ -2117,7 +2103,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 # 没有第三步：不存在"更新 User Model"的写操作
 ```
 
-**约束 A 的落实**：管线里**没有任何一步**去更新"用户画像表/缓存/会话级快照"。User Model 永远是 `SELECT … WHERE subject_type='user' AND status='active'` 的实时结果。管线只负责让这张表的状态正确（`status`、`valid_until`、`superseded_by`），不负责"同步"任何派生结构。P8 接入时也不许在插件里缓存记忆内容（V1 明确禁止本地副本缓存，代价是每轮一次查询——毫秒级，可接受）。
+**约束 A 的落实**：管线里**没有任何一步**去更新"用户画像表/缓存/会话级快照"。User Model 永远是 `SELECT … WHERE subject_type='user' AND status='active'` 的实时结果。管线只负责让这张表的状态正确（`status`、`valid_until`、`superseded_by`），不负责"同步"任何派生结构。宿主接入接入时也不许在插件里缓存记忆内容（V1 明确禁止本地副本缓存，代价是每轮一次查询——毫秒级，可接受）。
 
 #### 6.1 WHY 不做人工审核队列
 
@@ -2125,7 +2111,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 
 1. **审核队列会把"记错"变成"记不进"**。用户说"我在备考"，弹一个"是否确认"——绝大多数人不想管，于是所有记忆都停在 pending，系统等于没有记忆。
 2. **真正需要人确认的是"低置信推断"，不是"用户明说"**。对前者，正确做法是降级（`on_demand` + confidence 0.6），而不是排队——降级后它不影响默认上下文，等真的被检索到时模型会看到"这是推断"的标注。
-3. **可纠正性比事前审核更重要**。V1 的重心是 P9 的 `list/get/update/forget/explain`：写错了能一眼看到、一句话改掉、能追到是哪句话导致的。事前拦截的效率远低于事后纠错。
+3. **可纠正性比事前审核更重要**。V1 的重心是 管理的 `list/get/update/forget/explain`：写错了能一眼看到、一句话改掉、能追到是哪句话导致的。事前拦截的效率远低于事后纠错。
 4. **拒绝写入已经有出口**：Value Gate 的 IGNORE 日志 + 工具返回值里的 `reason`，模型自己能看到"为什么没记"，必要时它会换个说法重试或直接问用户。
 
 **替代方案（V1 必须有）**：
@@ -2145,7 +2131,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 | **MERGE** | **多条**同槽位碎片合成一条 | "喜欢简洁" + "讨厌长段落" + "少用列表" → 一条"偏好极简表达" | 新建一条（`metadata.merged_from=[...]`）；被合并条 `status='archived'`、`superseded_by=新id`；`valid_until=now` | 是：被合并条目整行仍在，时间轴逐条记 `action='merge'` |
 | **SUPERSEDE** | 旧事实**不再成立**，被新事实取代（两条都留下） | "考研" → "不考研了"；"用 Python" → "全迁到 TypeScript" | 旧：`status='superseded'`、`valid_until=now`、`superseded_by=新id`；新：ADD 一行 `status='active'`、`supersedes=旧id`（记在 `metadata`） | 是：两条并存，链条完整 |
 | **ARCHIVE** | 事实仍成立但**不再需要主动使用**（退场，不删除） | 去年的项目约定、已完成的旧目标（"2025 年考过一次"） | `status='archived'`；`valid_until` 视情况填 | 是：行在，只是不再命中默认检索 |
-| **DELETE** | 用户要求忘掉 / 隐私 / 明确错误 | "忘掉我提过的那件事" / "那条记错了" | `status='deleted'`；`memory_change(action='delete', reason)` | **软删**：行仍在，检索不命中；只有显式 `purge()`（P9 二次确认）才物理删除 |
+| **DELETE** | 用户要求忘掉 / 隐私 / 明确错误 | "忘掉我提过的那件事" / "那条记错了" | `status='deleted'`；`memory_change(action='delete', reason)` | **软删**：行仍在，检索不命中；只有显式 `purge()`（管理二次确认）才物理删除 |
 
 **`TOUCH` 是 IGNORE 的一个特例**（不改内容，只刷新 `updated_at`/`confidence`），单独列出来是因为它会写时间轴，容易被误当成 UPDATE。
 
@@ -2194,12 +2180,12 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 
 `memory_change` 同时写入三条：`M1: supersede`、`M2: add`、以及一条 `M1→M2` 的 `reason` 记录。
 
-#### 8.3 四个必须成立的性质（P10 用例 C 的断言）
+#### 8.3 四个必须成立的性质（评估用例 C 的断言）
 
 1. **M1 不是 `deleted`，也不是 `active`** —— 是 `superseded`。删了就丢失"他曾经要考研"这一事实（那件事影响过很多回答）。
 2. **不是并列新增两条 active** —— 若 M1 还是 active，检索会同时命中"在考研"和"在找工作"，模型会给出自相矛盾的建议。这是"冲突是 feature"里唯一必须消灭的形态：**同一槽位的互斥现状只能有一个 active**。
 3. **`valid_until` 必须有值** —— 否则 M1 在时间维度上"至今有效"，任何按时间过滤的查询都会把它当现状。
-4. **`superseded_by` 指向的新条目存在且 active** —— 链条不能断（P2 §7 不变式 2）。
+4. **`superseded_by` 指向的新条目存在且 active** —— 链条不能断（数据模型 §7 不变式 2）。
 
 #### 8.4 边界情况（容易做错的地方）
 
@@ -2212,7 +2198,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 
 ---
 
-### 9. 失败与并发（P7 必须实现）
+### 9. 失败与并发（引擎层必须实现）
 
 | 场景 | 处理 |
 | --- | --- |
@@ -2224,7 +2210,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 
 ---
 
-### 10. 自检清单（P3 完成判据）
+### 10. 自检清单（写入管线完成判据）
 
 | 判据 | 本文位置 |
 | --- | --- |
@@ -2234,7 +2220,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 | "考研→不考研"完整走通（含数据与四条断言） | §8 |
 | 无强制人工审核队列，且给出理由与替代方案 | §6.1 |
 | 每个拒绝写入都有可复现的判据（五问表 + 判定表） | §3 |
-| 与 P2 的字段/不变式一致 | §5.2、§8.2 |
+| 与 数据模型的字段/不变式一致 | §5.2、§8.2 |
 | 与约束 A/B/C/D 无冲突 | §6（A）、§5.3(2)（B）、§7 SUPERSEDE（C）、§5.2 槽位含 scope 语义（D） |
 
 ---
@@ -2260,22 +2246,21 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 两边共用同一套判定，测试断言同输入下 preview 的结论与 add 的 action 一致。
 
 
-
 ## 5. 读取管线
 
 三通道（S1/S2/T）、四类上下文、预算与裁剪、去重与压缩重建。
 
 
-> 上游：`MEMORY_SCHEMA_V1.md`（policy/scope 语义）、`CURRENT_ENVIRONMENT_ANALYSIS.md` §3/§5（pre-step 与 runtime-context 两个真实通道）、`ADOPTION_DECISION_TABLE.md`（A3/A8/A9/A4/A5/A6/A7）。
+> 上游：§3（policy/scope 语义）、§8 §3/§5（pre-step 与 runtime-context 两个真实通道）、§12（A3/A8/A9/A4/A5/A6/A7）。
 > 本文回答：**一轮对话开始时，哪些记忆该出现、以什么形式出现、出现多少、以及为什么其余的不要出现。**
-> 检索打分与 Top-K 计算在 P5；本文只做"路由与预算"。
+> 检索打分与 Top-K 计算在 检索；本文只做"路由与预算"。
 
 ---
 
 ### 0. 三条铁律
 
 1. **注入不是越多越好。** 一条无关记忆的代价不是"多占 20 个字"，而是让模型把一个不成立的前提带进回答。预算存在的目的是**逼着做取舍**。
-2. **value ≠ frequency。** `importance` 高的记忆可以 `on_demand`（"用户对花生过敏"平时不该出现）。见 P2 §5.3。
+2. **value ≠ frequency。** `importance` 高的记忆可以 `on_demand`（"用户对花生过敏"平时不该出现）。见 §3 第 5.3 小节。
 3. **同一条记忆，一个会话里不该重复出现。** 注入块会留在会话历史里、每个请求都重发；重复注入等于让历史滚雪球。
 
 ---
@@ -2284,7 +2269,7 @@ with db:                       # 单事务；SQLite 下 BEGIN IMMEDIATE
 
 DSH 里有三个**互不重叠**的位置能放"记忆"，它们的生命周期完全不同——这是本设计最关键的结构决定。
 
-> **v1.1 修订（ADR-019）**：C 通道原来用 `systemPrompt.context()`，靠 DSH 的 `RuntimeContextProjection` 在压缩后自动重发。真实环境里发现本机装了 `billion-context`（ACP 代理层），它在**请求体层**改写历史、不发会话事件，而且把 `compaction-basic` 的 `auto` 关掉了——于是"压缩后自动恢复"这条路在真实桌面里根本不触发（详见 `UNKNOWN_LIST.md` U-003）。改法是把常驻事实从 `context` 搬到 `section`：**system prompt 是唯一不会被任何一层压缩器折叠的位置**。下面的表已按改后的状态写。
+> **v1.1 修订（ADR-019）**：C 通道原来用 `systemPrompt.context()`，靠 DSH 的 `RuntimeContextProjection` 在压缩后自动重发。真实环境里发现本机装了 `billion-context`（ACP 代理层），它在**请求体层**改写历史、不发会话事件，而且把 `compaction-basic` 的 `auto` 关掉了——于是"压缩后自动恢复"这条路在真实桌面里根本不触发（详见 §13 U-003）。改法是把常驻事实从 `context` 搬到 `section`：**system prompt 是唯一不会被任何一层压缩器折叠的位置**。下面的表已按改后的状态写。
 
 | 通道 | 技术落点 | 放什么 | 何时变化 | 压缩后 |
 | --- | --- | --- | --- | --- |
@@ -2368,7 +2353,7 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 规则：
 1. 命中多个 → 取**命中词数最多**的；并列 → 取**本会话最近用过**的（粘性）。
 2. 一个都不命中 → `domain = null`，**不注入 Domain 层**（宁少勿多）。
-3. `study.math` 能被父级 `study` 的条目匹配（前缀匹配，见 P5）。
+3. `study.math` 能被父级 `study` 的条目匹配（前缀匹配，见 §6）。
 
 ---
 
@@ -2391,7 +2376,7 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 | --- | --- | --- |
 | "称呼用户为老张" | interaction | 稳定、跨任务、高置信（用户明说） |
 | "用简体中文回答" | interaction | 同上，且不需要检索判断 |
-| "先讲思路再给步骤" | interaction | 同上（S2 种子，见 P2 §9） |
+| "先讲思路再给步骤" | interaction | 同上（S2 种子，见 §3 第 9 小节） |
 | "不要用'首先/其次/最后'套话，不要堆 emoji" | interaction | 负向偏好，同样稳定 |
 | "回答里尽量给可运行的具体代码" | preference | 跨任务有用 |
 
@@ -2413,9 +2398,9 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 
 | 规则 | 说明 |
 | --- | --- |
-| 过期的不注入 | `valid_until <= now` 的一律不取（P6 会把它们转成 `archived`/`superseded`，但读路径要自己再挡一次） |
-| 同槽位多条 active 视为异常 | P3 承诺同槽位只有一个 active。若读到多条，**全都注入但加冲突标注**（"注意：关于你的目标有两条矛盾记录"），而不是替用户选一个 |
-| 只在相关时注入？ | **不**。当前状态默认注入（这正是它和 domain 的区别：状态影响"现在该说什么"）。但如果 `domain_key` 与当前推断 domain 完全不相关，降到第二档（见 §5 裁剪优先级 P3） |
+| 过期的不注入 | `valid_until <= now` 的一律不取（生命周期会把它们转成 `archived`/`superseded`，但读路径要自己再挡一次） |
+| 同槽位多条 active 视为异常 | 写入管线承诺同槽位只有一个 active。若读到多条，**全都注入但加冲突标注**（"注意：关于你的目标有两条矛盾记录"），而不是替用户选一个 |
+| 只在相关时注入？ | **不**。当前状态默认注入（这正是它和 domain 的区别：状态影响"现在该说什么"）。但如果 `domain_key` 与当前推断 domain 完全不相关，降到第二档（见 §5 裁剪优先级 写入管线） |
 
 **预算：≤ 3 条，≤ 200 字符。**
 
@@ -2440,11 +2425,11 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 1. **模型显式调用** `memory_search`（`on_demand` 的真实出口）；
 2. 用户明确问及过去（"上次那个 bug 后来怎么解决的"）——此时路由规则判定为 `on_demand` 命中，由检索层返回，作为**工具结果**进入上下文，而不是凭空注入。
 
-**预算：0 条 / 0 字符（默认）。** 这一条要在 P10 的用例 D 里被证明：问数学题时，历史一条都不出现。
+**预算：0 条 / 0 字符（默认）。** 这一条要在 评估的用例 D 里被证明：问数学题时，历史一条都不出现。
 
 #### 3.5 `never` 层
 
-`injection_policy='never'` 的记忆**任何通道都不读**（连 `search` 默认也不返回，需显式 `include_never=true`）。它存在只是为了"用户说过、系统记着、但不主动用"（比如很私人的事），以及给 P9 管理界面可查。
+`injection_policy='never'` 的记忆**任何通道都不读**（连 `search` 默认也不返回，需显式 `include_never=true`）。它存在只是为了"用户说过、系统记着、但不主动用"（比如很私人的事），以及给 管理管理界面可查。
 
 ---
 
@@ -2461,7 +2446,7 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 | M3 | profile/interaction | 不要用"首先/其次/最后"套话 | always | — | ✅ S2 通道 |
 | M4 | profile/identity | 本科能动专业，偏传热学 | **contextual** | study | ❌ 数学题不需要（且预算先给 M5） |
 | M5 | state/goal | 备考：数学一/英语一/传热学，12 月初试 | contextual | study | ✅ T 通道（Active State） |
-| M6 | state/situation | 机器是 Windows + PowerShell 7 | contextual | — | ❌ 与数学题无关（裁剪 P3） |
+| M6 | state/situation | 机器是 Windows + PowerShell 7 | contextual | — | ❌ 与数学题无关（裁剪 写入管线） |
 | M7 | domain/pitfall | asar 里 grep 读不到，要先解包 | contextual | code.dsh | ❌ domain 不匹配（code vs study.math） |
 | M8 | domain/convention | 这个仓库测试统一用 `pytest -q` | contextual | code.dsh | ❌ 同上 |
 | M9 | episodic/event | 2026-11-13 让我实现记忆功能 | on_demand | — | ❌ Historical 默认 0 条 |
@@ -2491,11 +2476,11 @@ S2 只装 `always` 层，而 `always` 的准入门槛极高（见 §3.1），装
 | 未注入 | 挡在哪个环节 | 理由 |
 | --- | --- | --- |
 | M4 本专业 | 预算裁剪 | `contextual` + `domain=study`，本来能匹配（`study` 是 `study.math` 的父级），但 Active State 与领域条目的预算优先给了"当前目标"和"上次卡点"，M4 的信息对解这道题没有增量 |
-| M6 Windows 环境 | 预算裁剪 P3 | 与数学题完全不相关；它是"回答代码问题时才需要"的状态 |
+| M6 Windows 环境 | 预算裁剪 写入管线 | 与数学题完全不相关；它是"回答代码问题时才需要"的状态 |
 | M7/M8 asar / pytest | domain 不匹配 | `code.dsh` ≠ `study.math`，前缀都不交 |
 | M9 上次让我做记忆功能 | Historical 默认 0 | 旧事件，与求极限无关 |
 
-**这个例子的意义**：证明"不注入"是**主动设计的结果**（每条都能说出被哪条规则挡住），不是"碰巧没查到"。P10 用例 D 会把它变成断言。
+**这个例子的意义**：证明"不注入"是**主动设计的结果**（每条都能说出被哪条规则挡住），不是"碰巧没查到"。评估用例 D 会把它变成断言。
 
 ---
 
@@ -2612,14 +2597,14 @@ token 估算：`tokens ≈ ceil(chars / 1.5)`（中文按 1.5 字符/token 保�
 
 | 计数 | 时机 | 用途 |
 | --- | --- | --- |
-| `inject_count += 1` | 每条被注入时 | 观测哪些记忆"一直在场"（配合 P11 发现常驻噪音） |
+| `inject_count += 1` | 每条被注入时 | 观测哪些记忆"一直在场"（配合 调优发现常驻噪音） |
 | `use_count += 1` | `memory_search` 命中并返回给模型时 | 观测哪些记忆"真的被用到" |
 
 **都不参与排序**（见 ADR-010）：注入次数高不等于有用（可能只是常驻），用它加权会形成正反馈霸榜。
 
 ---
 
-### 8. 与压缩的完整时序（P8 要验证的就是这条链）
+### 8. 与压缩的完整时序（宿主接入要验证的就是这条链）
 
 ```
 turn N 开始
@@ -2648,7 +2633,7 @@ turn M 的 pre-step
 
 ---
 
-### 9. 自检清单（P4 完成判据）
+### 9. 自检清单（读取管线完成判据）
 
 | 判据 | 位置 |
 | --- | --- |
@@ -2662,13 +2647,12 @@ turn M 的 pre-step
 | 压缩后重注入的时序完整 | §8 |
 
 
-
 ## 6. 检索
 
 结构化过滤 + 词法/二元组、六因子打分、命中闸门、Top-K 与冲突标注。
 
 
-> 上游：`MEMORY_SCHEMA_V1.md` §8（索引与检索路径）、`MEMORY_READ_PIPELINE.md` §5（预算）。
+> 上游：§3 §8（索引与检索路径）、§5 §5（预算）。
 > 本文只解决一件事：**给定一个查询，从库里挑出最多 6 条，并说清为什么是这几条。**
 > V1 的边界：**结构化过滤 + 词法匹配**。没有向量、没有 embedding、没有 FTS5、没有 bigram 索引（全部 V2）。
 
@@ -2742,7 +2726,7 @@ LIMIT 200;
 
 **为什么 `LIMIT 200`**：候选上限是刻意设的。超过 200 说明结构化过滤没起作用（典型原因：`domain_key` 全为 NULL），此时正确的修法是**修写入质量**，不是让检索扫更多行。超限时记日志并可观测。
 
-**已过期的处理**：`valid_until <= now` 的 `active` 行**默认不进候选**（它们是 P6 生命周期该清理却没清干净的残留）。但 `memory_search(explicit_id=...)` 或 `include_expired=true` 时能取到，且带过期标注。
+**已过期的处理**：`valid_until <= now` 的 `active` 行**默认不进候选**（它们是 生命周期生命周期该清理却没清干净的残留）。但 `memory_search(explicit_id=...)` 或 `include_expired=true` 时能取到，且带过期标注。
 
 #### 2.2 阶段②：V1 的两条词法路
 
@@ -2754,7 +2738,7 @@ V1 **不做查询侧的自由分词**（没有词典就分不准，硬分只会�
 2. 对每个 `v ∈ V`，检查 `v` 是否作为**子串**出现在归一化后的查询 `q` 里（`v in q`）。
 3. 命中即得一个 term；**最长匹配优先**：若 `数学` 与 `数学一` 同时命中且位置重叠，只留 `数学一`。
 
-> 这一步就是"用记忆自己的词表给查询切分"：词表是写入方（模型或抽取器）填的 `keywords`，本来就是"人会用来搜这条记忆的词"。它的精度上限由写入质量决定——所以 P3 把 `keywords` 列为必填，并在工具 schema 里要求"填 3–6 个检索词，用空格分隔"。
+> 这一步就是"用记忆自己的词表给查询切分"：词表是写入方（模型或抽取器）填的 `keywords`，本来就是"人会用来搜这条记忆的词"。它的精度上限由写入质量决定——所以 写入管线把 `keywords` 列为必填，并在工具 schema 里要求"填 3–6 个检索词，用空格分隔"。
 
 ##### 路 B：片段匹配（兜底）
 
@@ -2763,7 +2747,7 @@ V1 **不做查询侧的自由分词**（没有词典就分不准，硬分只会�
 3. 片段长度 > 8 字时按 4 字粗切（`_chunk`）：不是词典分词，也不是 2-gram 滑窗，只为把"一长串没有虚词的短语"变成几个可匹配的片段。
 4. 保留长度 2–8 的片段作为 term；对每个候选检查 `term in normalize(content)`。
 
-> 第 2 步是 P7 实测后才定形的：最初把停用字**删除**而不是当分隔符，`"数学一的复习安排"` 会被删成 `"数学一复习安排"` 这个 7 字长串，谁也匹配不上。停用字是**切分点**，不是噪声。
+> 第 2 步是引擎层实测后才定形的：最初把停用字**删除**而不是当分隔符，`"数学一的复习安排"` 会被删成 `"数学一复习安排"` 这个 7 字长串，谁也匹配不上。停用字是**切分点**，不是噪声。
 
 **路 B 的作用是"召回少量词表外的词"**（用户问了一个新词，而某条记忆正文里恰好有原话）。它的命中权重低于路 A（正文命中不如关键词命中确定）。
 
@@ -2786,14 +2770,14 @@ Final = Relevance × Confidence × Importance × Freshness × ContextMatch × Co
 
 | 因子 | 取值范围 | 定义 | 为什么是这个形状 |
 | --- | --- | --- | --- |
-| **Relevance** | [0,1) | `raw / (raw + 2)`，其中 `raw = Σ w(t)`；路 A 命中 `w = len(t)`，路 B 命中 `w = 0.75 × len(t)` | 饱和函数：命中 2 个 3 字词 ≈ 0.75，命中 5 个 ≈ 0.88。**长查询不会线性膨胀分数**，避免"话多的人赢"。路 B 给 0.75 而不是 0.5：逐字出现在正文里的 3 字词，证据强度和词表命中差不了多少，压太低会让单关键词查询永远够不到闸门（P7 实测调整，见 §7） |
+| **Relevance** | [0,1) | `raw / (raw + 2)`，其中 `raw = Σ w(t)`；路 A 命中 `w = len(t)`，路 B 命中 `w = 0.75 × len(t)` | 饱和函数：命中 2 个 3 字词 ≈ 0.75，命中 5 个 ≈ 0.88。**长查询不会线性膨胀分数**，避免"话多的人赢"。路 B 给 0.75 而不是 0.5：逐字出现在正文里的 3 字词，证据强度和词表命中差不了多少，压太低会让单关键词查询永远够不到闸门（引擎实现实测调整，见 §7） |
 | **Confidence** | [0,1] | 列值 | 直接乘。0.5 置信的记忆无论如何排不到 0.95 的前面 |
 | **Importance** | {1.0, 0.8, 0.5, 0.25} | key/important/normal/low 映射 | 枚举→固定值，可预测（ADR-009） |
 | **Freshness** | [0.2, 1] | `max(0.2, 0.5^(age_days / half_life))`；`age_days` 从 `updated_at` 算（state 用 `valid_from`） | 半衰期比 `exp(-λt)` 好解释。**下限 0.2**：老记忆只是靠后，不会彻底消失（"用户 2024 年说过的话"仍可能被搜到） |
 | **ContextMatch** | {1.0, 0.9, 0.85, 0.5} | 见下表 | 领域匹配是"这次该不该想起它"的最强信号 |
 | **ConflictPenalty** | {1.0, 0.7, 0.5} | 见下表 | 有冲突不是隐藏，是**降权 + 标注**（约束 C） |
 
-**半衰期（写死在代码里，P6 会引用同一张表）**：
+**半衰期（写死在代码里，生命周期会引用同一张表）**：
 
 | type | half_life | 理由 |
 | --- | --- | --- |
@@ -2842,14 +2826,14 @@ Final = Relevance × Confidence × Importance × Freshness × ContextMatch × Co
 1. **宁缺勿滥**：候选的 `命中分 = Relevance × Confidence × ContextMatch < 0.15` 时，一律不进结果。理由：低命中条目基本都是噪声，注入它们比不注入更伤——模型会把无关记忆当成前提。
 2. **不够就不凑**：候选不足 4 条时全返回，不补。
 
-**闸门为什么卡"命中分"而不是 Final Score**（P7 实测纠正，初版写的是 `Final < 0.30` 清零）：`Importance`、`Freshness`、`ConflictPenalty` 都是乘数，用 Final Score 当闸门会带来两个静默故障——
+**闸门为什么卡"命中分"而不是 Final Score**（引擎实现实测纠正，初版写的是 `Final < 0.30` 清零）：`Importance`、`Freshness`、`ConflictPenalty` 都是乘数，用 Final Score 当闸门会带来两个静默故障——
 
 | 场景 | Final Score | 后果 |
 | --- | --- | --- |
 | `importance = normal`（0.5）但完全相关 | `0.43 × 0.9 × 0.5 × 1.0 × 0.9 ≈ 0.17` | 刚好擦线；稍旧一点就彻底搜不到，等于"普通重要性的记忆从不出现" |
 | 已过期的 state（`Freshness` 触底 0.2、冲突 0.5） | `0.6 × 0.9 × 1.0 × 0.2 × 0.9 × 0.5 ≈ 0.05` | **永远**出不来，于是"过时降权"悄悄变成"过时消失"——比直接删掉更危险，用户还以为记着 |
 
-所以：**闸门只管"算不算命中"（相关 × 可信 × 适用），重要性/新鲜度/冲突只调排序和标注**（这正是 P0 约束 B：记忆价值 ≠ 注入频率）。Final Score 仍然照原公式算，只用于排序与 Top-K 截断。
+所以：**闸门只管"算不算命中"（相关 × 可信 × 适用），重要性/新鲜度/冲突只调排序和标注**（这正是 设计原则约束 B：记忆价值 ≠ 注入频率）。Final Score 仍然照原公式算，只用于排序与 Top-K 截断。
 
 **0.15 怎么来的**：一条"命中两三个字 + 置信 0.9 + 领域对得上"的记忆 `0.43 × 0.9 × 0.9 ≈ 0.35`；一条"只蹭到一个弱子串 + 置信 0.6 + 领域不搭"的记忆 `0.33 × 0.6 × 0.5 ≈ 0.10`。0.15 落在两者之间，是"确实命中"与"沾点边"的分界。
 
@@ -2857,9 +2841,9 @@ Final = Relevance × Confidence × Importance × Freshness × ContextMatch × Co
 
 ### 4. 三个手算样例
 
-为了让 P7 能用测试断言，每个样例都给出**完整中间值**。
+为了让 引擎实现能用测试断言，每个样例都给出**完整中间值**。
 
-> **注意**：下面三张表是按 P5 **初版参数**（路 B 权重 0.5、闸门 `Final < 0.30`）手算的，用于说明公式形状与排序逻辑；P7 实现后按实测调整了两处参数（见 §8），因此表中"被丢弃/不返回"的判定与实现可能不同——**公式与排序方向不变**，变的只是闸门位置。
+> **注意**：下面三张表是按 检索 **初版参数**（路 B 权重 0.5、闸门 `Final < 0.30`）手算的，用于说明公式形状与排序逻辑；引擎实现实现后按实测调整了两处参数（见 §8），因此表中"被丢弃/不返回"的判定与实现可能不同——**公式与排序方向不变**，变的只是闸门位置。
 
 #### 4.1 样例一：profile 查询（`memory_search("我怎么跟你说话来着")`）
 
@@ -2915,20 +2899,20 @@ Final = Relevance × Confidence × Importance × Freshness × ContextMatch × Co
 
 ---
 
-### 6. 性能预算（P7 实现约束）
+### 6. 性能预算（引擎实现实现约束）
 
 | 环节 | 目标 | 手段 |
 | --- | --- | --- |
 | 结构化过滤 | < 5 ms | 走 `idx_mem_policy` / `idx_mem_type_domain` / `idx_mem_valid` |
 | 词法打分 | < 10 ms | ≤ 200 候选 × ≤ 8 term 的 `in` 判断，纯 Python 字符串操作 |
 | 端到端 `search()` | **< 20 ms** | 单次 SQLite 连接、无嵌套查询（不在循环里查库） |
-| 端到端注入检索 | **< 50 ms** | 含一次 Python 进程往返（P8 用常驻子进程，非每次 spawn） |
+| 端到端注入检索 | **< 50 ms** | 含一次 Python 进程往返（宿主接入用常驻子进程，非每次 spawn） |
 
-超过就记日志（`slow_query`），P11 用它找真实缺陷。
+超过就记日志（`slow_query`），调优用它找真实缺陷。
 
 ---
 
-### 7. 自检清单（P5 完成判据）
+### 7. 自检清单（检索完成判据）
 
 | 判据 | 位置 |
 | --- | --- |
@@ -2944,7 +2928,7 @@ Final = Relevance × Confidence × Importance × Freshness × ContextMatch × Co
 
 ---
 
-### 8. 实现对齐（P7 回填）
+### 8. 实现对齐（引擎实现回填）
 
 写代码时被实测打回来的三处参数/规则。**文档先改、代码再对齐**的顺序在这里反过来了一次：这三处都是"跑起来才发现设计参数不成立"，因此如实回填，而不是让文档停留在纸面。
 
@@ -2967,20 +2951,19 @@ OK
 **仍未解决（V2）**：单字查询（`"熵"`）不参与匹配；查询侧不做自由分词；Bigram/FTS5 与覆盖率阈值全部推迟。这三条都写在 §2.2 的局限表里，不是遗忘。
 
 
-
 ## 7. 生命周期与可解释性
 
 状态机与合法转移、explain 的四问、删除的三层。
 
 
-> 上游：`MEMORY_SCHEMA_V1.md` §7（status 四值 + 五条不变式）、`MEMORY_WRITE_PIPELINE.md` §7（七种操作）。
+> 上游：§3 §7（status 四值 + 五条不变式）、§4 §7（七种操作）。
 > 本文负责：**一条记忆从生到死的全部合法路径、每条路径的触发条件、以及事后怎么解释它为什么变成现在这样。**
 
 ---
 
 ### 1. 先解决一个术语冲突：六个状态名 vs 四个状态值
 
-任务书要求状态机包含 `created / active / updated / superseded / archived / deleted` 六个节点，而 P2 把 `status` 列限定为四个值。这不是矛盾，是**两种东西**：
+任务书要求状态机包含 `created / active / updated / superseded / archived / deleted` 六个节点，而 数据模型把 `status` 列限定为四个值。这不是矛盾，是**两种东西**：
 
 | 六个节点里的 | 实际是什么 | 怎么表示 |
 | --- | --- | --- |
@@ -2990,7 +2973,7 @@ OK
 
 **为什么不做成六个值**：`created`/`updated` 如果能被检索、被筛选、被用户看到，就必然产生"一条 created 状态却已经在被注入"的中间态 bug。它们对"这条记忆现在算不算数"没有任何影响——检索只关心那四个持续状态。把瞬时性交给时间戳，是这类状态机最省事也最不容易错的做法。
 
-**后果**：`status` 的合法取值只有四个；任何代码写 `status='created'` 都应该在 CHECK 约束上直接报错。P7 的测试要专门断言这一点。
+**后果**：`status` 的合法取值只有四个；任何代码写 `status='created'` 都应该在 CHECK 约束上直接报错。引擎层的测试要专门断言这一点。
 
 ---
 
@@ -3050,7 +3033,7 @@ OK
 | **archived → superseded** | 归档条目本就不参与现状 | 若确实被取代，先 restore 再 supersede，或直接删 | 见 T8 |
 | **任何 → created** | 没有 time travel | — | — |
 
-**报错示例**（P7 要照这个写）：
+**报错示例**（引擎实现要照这个写）：
 ```
 拒绝：记忆 m-aaa1 当前为 superseded，不能回到 active。
 同一件事的"现在"只能有一条。若用户改主意，请新增一条（memory_remember 带 supersedes=m-aaa1）。
@@ -3060,7 +3043,7 @@ OK
 
 ### 3. 完整示例：Python → TypeScript
 
-任务书点名的第二个场景（第一个是 P3 的考研→不考研）。它比考研更硬，因为**改变的是领域事实，不是用户状态**。
+任务书点名的第二个场景（第一个是 写入管线的考研→不考研）。它比考研更硬，因为**改变的是领域事实，不是用户状态**。
 
 #### 3.1 时间线
 
@@ -3125,7 +3108,7 @@ OK
 | "Python 只是写脚本，后端还是 Python" | 不动作（用户澄清的是范围，不是否定） | 立刻 supersede |
 | "一半迁完了，还有一半 Python" | `ADD` 一条并行事实（`metadata.partial=true`），M1 改 `UPDATE` 缩小范围 | 把 M1 标 superseded（事实还有一半成立） |
 | "又迁回 Python 了" | `ADD M3`（`supersedes=m-p2`），**不复活 M1** | 把 M1 改回 active |
-| 用户从没说过迁移，模型自己"猜"项目换了技术栈 | **不许**（推断不能 supersede 显式记忆，P3 §4） | —— |
+| 用户从没说过迁移，模型自己"猜"项目换了技术栈 | **不许**（推断不能 supersede 显式记忆，写入管线 §4） | —— |
 
 ---
 
@@ -3140,7 +3123,7 @@ OK
 | **什么触发？** | `memory_change.actor` + `source_message_id` | "由模型工具 `memory_supersede` 触发，来源消息 evt-000841" |
 | **旧版/新版各是什么？** | `memory_change.old_snapshot` / `new_snapshot`（整行 JSON） | 可逐字对比 |
 
-#### 4.1 `explain(id)` 的输出契约（P7 实现，P9 展示）
+#### 4.1 `explain(id)` 的输出契约（引擎实现实现，管理展示）
 
 ```jsonc
 {
@@ -3162,7 +3145,7 @@ OK
 
 **`state_reason` 是生成的一句话，不是存下来的字段**——它由 `status` + 关联条目 + 最近一条 change 拼出来。存它等于存副本（违反约束 A 的精神：可推导的东西不物化）。
 
-#### 4.2 可解释性的最低保证（P7 测试断言）
+#### 4.2 可解释性的最低保证（引擎实现测试断言）
 
 | 保证 | 断言 |
 | --- | --- |
@@ -3202,11 +3185,11 @@ OK
 
 **为什么 L2 不直接物理删**：用户说"忘掉"通常指"别再提"，不是"帮我做数据销毁"。软删立刻达到效果（检索不到、注入不到），又留了误删恢复的路。真正需要物理销毁的场景（隐私合规）走 L3，且要明确告知不可恢复。
 
-**P9 的界面必须区分这三层**：`忘记` 按钮 = L2（默认），`永久删除` 藏在详情页的"危险操作"里 = L3。
+**管理的界面必须区分这三层**：`忘记` 按钮 = L2（默认），`永久删除` 藏在详情页的"危险操作"里 = L3。
 
 ---
 
-### 7. P9 界面表现（生命周期在这里必须"看得见"）
+### 7. 管理界面表现（生命周期在这里必须"看得见"）
 
 | 界面位置 | 显示什么 | 为什么 |
 | --- | --- | --- |
@@ -3222,7 +3205,7 @@ OK
 
 ---
 
-### 8. 不变式与断言（P7 测试清单）
+### 8. 不变式与断言（引擎实现测试清单）
 
 | # | 不变式 | 断言方式 |
 | --- | --- | --- |
@@ -3238,19 +3221,18 @@ OK
 
 ---
 
-### 9. 自检清单（P6 完成判据）
+### 9. 自检清单（生命周期完成判据）
 
 | 判据 | 位置 |
 | --- | --- |
-| 六个节点都有定义，且与 P2 的四个 status 不冲突（并解释为什么） | §1 |
+| 六个节点都有定义，且与 数据模型的四个 status 不冲突（并解释为什么） | §1 |
 | 状态机图 + 穷尽的合法转移表（含触发条件与发起者） | §2.1 |
 | 非法转移被显式拒绝并给出正确做法 | §2.2 |
 | "Python → TypeScript" 示例完整（数据 + 三条 change + 为什么不是 UPDATE） | §3 |
 | 可解释性四问都有数据落点，`explain()` 有输出契约 | §4 |
 | 自动转换范围最小化，且每条都有"为什么安全" | §5 |
 | 删除分三层，不把"忘掉"做成"删库" | §6 |
-| P9 界面表现具体到每个控件 | §7 |
-
+| 管理界面表现具体到每个控件 | §7 |
 
 
 ## 8. 宿主接入路径
@@ -3263,7 +3245,7 @@ DeepSeek Harness 的消息生命周期取证、三个注入点的选择依据、
 > ③ 上下文被压缩之后，Memory 怎么重新回到模型眼前。
 >
 > 证据等级：本文每条结论都标注来源。`[代码]` = 本机解包源码 + 行号；`[文档]` = 包内 README；
-> `[实测]` = 本机运行结果；`[推断]` = 由上述推出、尚未直接验证（对应 `UNKNOWN_LIST.md`）。
+> `[实测]` = 本机运行结果；`[推断]` = 由上述推出、尚未直接验证（对应 §13）。
 >
 > 源码基准：`<DSH_INSTALL>\resources\app.asar` 内 `dsh/`，已解包至
 > `<REPO_ROOT>\_dsh_extract`（21047 文件）。
@@ -3297,7 +3279,7 @@ DeepSeek Harness 的消息生命周期取证、三个注入点的选择依据、
 - `DSH_HOME=<DSH_HOME>`，`DSH_PROFILE=desktop`，`DSH_PROFILE_DIR=…\<DSH_HOME>\profiles\<profile>`。`[实测]`
 - profile 的 `cordis.yml` 只有 `[]` 四行，注释写明组合方式是**补丁叠加**：`package.json` 的 `dsh.profile.bundles` 顺序 → `cordis.patch.yml` → `--patch`。`[代码]`
 - 已启用 bundles（顺序）：`@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app`、`dshmarket`、`dsh-pet`、`dsh-session-manager`、`dsh-session-folders`、`dsh-upload-file`、`billion-context`、`dsh-plugin-wallpaper-engine`、`dsh-context`、`dsh-better-sidebar`。`[代码]` `<DSH_HOME>\profiles\<profile>\package.json`
-- 因此**接入 Memory 的标准做法**（P8 采用）：装一个带 `dsh.bundle.patch` 的包 → 进 `dsh.profile.bundles`，配置改 `cordis.patch.yml` 里对应 `id` 的条目。已有的 `dsh-local-memory`（第三方）就是这个形态：`cordis.patch.yml` 里只有 `- insert: [{ id: dsh-local-memory, name: dsh-local-memory }]`。
+- 因此**接入 Memory 的标准做法**（宿主接入采用）：装一个带 `dsh.bundle.patch` 的包 → 进 `dsh.profile.bundles`，配置改 `cordis.patch.yml` 里对应 `id` 的条目。已有的 `dsh-local-memory`（第三方）就是这个形态：`cordis.patch.yml` 里只有 `- insert: [{ id: dsh-local-memory, name: dsh-local-memory }]`。
 - 运行时服务名与包名同源：`ctx.systemPrompt`、`ctx.sessions`、`ctx.tools`、`ctx.webServer`、`ctx.get('connection')`。**访问未在 `inject` 里声明的服务会运行时报 `cannot get property "X" without inject`**，而如果外层套了 `try/catch`，表现就是"插件加载成功但功能全没有"——这是 `dsh-local-memory` 源码里用血写下的注释。`[代码]` `refs\nodal\src\host\index.js`
 
 #### 1.3 关键包（本任务够用的最小面）
@@ -3364,7 +3346,7 @@ DeepSeek Harness 的消息生命周期取证、三个注入点的选择依据、
 | system prompt | 首个 commit 必须占用 surface node 0（`dsh-system-prompt` 的 project 决策） | 支持 `systemPromptUpdate: 'in-history'` 的 route 追加在缓存历史后，其余就地改写 node 0 |
 | 注入窗口 | 用户消息之前 / 之后都可以 | 同上，但**必须按 id 去重**，否则同一块每轮重发，历史滚雪球 |
 
-结论：Memory 在**首轮与后续用同一套 read_for_context**，只在"首轮可多给一点"上做预算差异（P4 定义），不做两套机制。首轮不是特殊路径，只是一个还没历史的位置。
+结论：Memory 在**首轮与后续用同一套 read_for_context**，只在"首轮可多给一点"上做预算差异（读取管线定义），不做两套机制。首轮不是特殊路径，只是一个还没历史的位置。
 
 #### 2.3 会话事件（Write 的观察面）
 
@@ -3466,7 +3448,7 @@ function assembleContextFor(agent, signal) {
 - `dsh-local-memory`：写记忆**完全由模型调工具**完成，代码里没有任何自动抽取；它把"什么时候该写"写进常驻提示词（`prompt.js:58-74` 的"收工自检"：改了代码/bug/发布/装插件/定约定 → 自检"有没有下次还能复用、且从代码里看不出来的结论" → 有就 `memory_save`，没有就跳过，别为凑数而存）。
 - `meow-memory`：同样是工具驱动（`memory_remember` 必填 content/project/keywords/importance），另有 `agent/turn-stopping` 触发的"反思轮"（连续工具 step ≥7 才触发，让模型自评）。
 
-**V1 采用**：`session/event` 上的 `turn/end` 只做**确定性抽取**（用户在最后一条消息里显式陈述的偏好/状态，如"我不考研了""以后都用中文"），产出 candidate 后走同一套 Memory Manager 决策；其余靠模型工具。两条路共用写管线（P3），不各自为政。
+**V1 采用**：`session/event` 上的 `turn/end` 只做**确定性抽取**（用户在最后一条消息里显式陈述的偏好/状态，如"我不考研了""以后都用中文"），产出 candidate 后走同一套 Memory Manager 决策；其余靠模型工具。两条路共用写管线（见 §4），不各自为政。
 
 #### 4.3 工具注册
 
@@ -3539,7 +3521,7 @@ ctx.on('session/event', (session, event) => {
 - 清 seen 的理由：被压缩掉的块，其 id 仍记在"已注入"集合里 → 之后永远不再注入（这正是 `dsh-local-memory` 的缺陷：它的 `injectedBySession` 只在 sessionId 上记最后一次文本，全代码没有任何 compaction 处理，见 §8.3）。
 - 置 pending 而不是立刻注入：`compaction/*` 期间会话正被重写，此刻拿到的 surface 是中间态；下一次 `agent/pre-step` 才是稳定时机。
 
-#### 5.4 端到端验证方案（P8 必做）
+#### 5.4 端到端验证方案（宿主接入必做）
 
 1. 造 8–12 轮对话，塞入足量工具输出把压力推过阈值，或直接 `/compact`。
 2. 压缩后观察三件事：
@@ -3550,7 +3532,7 @@ ctx.on('session/event', (session, event) => {
 
 ---
 
-### 6. 其余可观测面（P8/P9 会用）
+### 6. 其余可观测面（宿主接入/管理会用）
 
 | 能力 | 用法 | 依据 |
 | --- | --- | --- |
@@ -3562,7 +3544,7 @@ ctx.on('session/event', (session, event) => {
 
 ---
 
-### 7. 并存的两个"压缩层"（必须写清，否则 P8 会误判）
+### 7. 并存的两个"压缩层"（必须写清，否则 宿主接入会误判）
 
 本机上除了 `dsh-compaction-basic`，还装了 **`billion-context` 0.1.212**（本会话的上下文管理功能就由它提供，工具调用里能看到 `search_context` / `acp_status` 这类工具）。
 
@@ -3572,11 +3554,11 @@ ctx.on('session/event', (session, event) => {
 设计含义（写进 ADR）：
 1. **不能假设"注入一次就长期有效"**。任何记忆块都可能被任一层吃掉。
 2. 因此 V1 的记忆注入**按轮重建、按内容去重**，而不是"首轮快照 + 长期驻留"。这既对抗 ACP 折叠，也对抗 `dsh-compaction`。
-3. P8 的"压缩后重注入"验证以 `dsh-compaction`（可观测、可断言）为主证据；ACP 层的表现只做旁证记录，不承诺可控（那是代理的行为，不是我的接入点）。
+3. 宿主接入的"压缩后重注入"验证以 `dsh-compaction`（可观测、可断言）为主证据；ACP 层的表现只做旁证记录，不承诺可控（那是代理的行为，不是我的接入点）。
 
 ---
 
-### 8. 与两份参考实现的差异（细节见 `ADOPTION_DECISION_TABLE.md`）
+### 8. 与两份参考实现的差异（细节见 §12）
 
 #### 8.1 meow-memory 0.32.7（快照注入派）
 - 七层 SQLite（soul/user/project/fact/lesson/topic/rules），首轮插一条 plugin snapshot，第二轮起按关键词 top-2 命中。
@@ -3601,7 +3583,7 @@ ctx.on('session/event', (session, event) => {
 
 ---
 
-### 9. 本阶段的空白（→ `UNKNOWN_LIST.md`）
+### 9. 本阶段的空白（→ §13）
 
 以下几项在源码里能查但我还没查到"确定答案"，一律不臆造，登记待确认：
 - 当前 route（`deepseek-flash`）的上下文窗口 `W` 与输出上限 `O` 的实际取值（决定压缩测试要造多长的对话）。
@@ -3622,7 +3604,7 @@ ctx.on('session/event', (session, event) => {
 | `systemPrompt.context` 的自动恢复 | 读 `RuntimeContextProjection`（`:297-349`）确认 retained 状态机与 `:324` 的压缩置空 |
 | 压缩默认阈值 | `thresholdRatio 0.8`、`headroomTokens 65536`、`retainRatio 16%` |
 | `billion-context` 是否走会话事件 | 命中数全 0，确认走代理层 |
-| Python 3.11.5 / node:sqlite FTS5 可用 | 确认（P7 用 Python，P8 插件侧若需 sqlite 也有备选） |
+| Python 3.11.5 / node:sqlite FTS5 可用 | 确认（引擎实现用 Python，宿主侧插件侧若需 sqlite 也有备选） |
 
 
 本文记录"长期记忆插件"如何接进 DeepSeek Harness：接了哪几处、为什么接在那里、怎么验证、怎么装、出问题怎么退。
@@ -3637,7 +3619,7 @@ ctx.on('session/event', (session, event) => {
 | 写 | A（主） | 8 个 `memory_*` 工具 | 模型自己判断该记什么 |
 | 写 | B（兜底） | `session/event` 的 `turn/end` | 确定性句式抽取，模型没动手时补位 |
 
-> **v1.1 修订（ADR-019）**：S2 原来是 `ctx.systemPrompt.context({order:200})`，靠 `RuntimeContextProjection` 在压缩后重发。实机发现桌面 profile 装了 `billion-context`（ACP 代理层），它在请求体重写历史、不发会话事件，还把 `compaction-basic` 的 `auto` 关掉了 —— 那条自动恢复路径在真实环境里不触发。改成 section 后，稳定层不再依赖任何"压缩通知"。详见 `UNKNOWN_LIST.md` U-003 与 `ADR.md` ADR-019。
+> **v1.1 修订（ADR-019）**：S2 原来是 `ctx.systemPrompt.context({order:200})`，靠 `RuntimeContextProjection` 在压缩后重发。实机发现桌面 profile 装了 `billion-context`（ACP 代理层），它在请求体重写历史、不发会话事件，还把 `compaction-basic` 的 `auto` 关掉了 —— 那条自动恢复路径在真实环境里不触发。改成 section 后，稳定层不再依赖任何"压缩通知"。详见 §13 U-003 与 §11 ADR-019。
 
 ### 1. 组成
 
@@ -3684,7 +3666,7 @@ ctx.systemPrompt.section({ name: 'memory:stable', order: 155, text: () => recall
 - 准入：`injection_policy='always'` ∧ `status='active'` ∧ `confidence ≥ 0.85` ∧ 正文 ≤ 80 字 ∧ 最多 6 条 ≤ 500 字。
 - 真机证据（`.verify/live-s2.db`，headless 单轮）：`system/message` 里出现 `## 长期记忆怎么用` 与 `[长期记忆 · 稳定事实]\n- 身份：用户叫李四，正在备考 2027 年考研。`，而该会话**没有任何 `source.kind='dsh-attune-memory'` 的 user 消息**——记忆只从 system prompt 进来。模型据此答出"李四"。
 
-> 历史说明（v1.1 之前）：这里原本是 `systemPrompt.context({order:200})`，DSH 把它合并成一条 `source.kind="runtime-context"` 的快照消息，靠 `RuntimeContextProjection`（`dsh-agent-loop/lib/index.js:324` 置 `retained=null`、`:333` 重发）在压缩后自动回来。机制本身是对的（P8 用它验证过 seq=9→34→40 的重发），但它在 `billion-context` 关掉 `compaction-basic.auto`、又在代理层自行压缩的环境里不会被触发，所以换成 section。
+> 历史说明（v1.1 之前）：这里原本是 `systemPrompt.context({order:200})`，DSH 把它合并成一条 `source.kind="runtime-context"` 的快照消息，靠 `RuntimeContextProjection`（`dsh-agent-loop/lib/index.js:324` 置 `retained=null`、`:333` 重发）在压缩后自动回来。机制本身是对的（宿主接入用它验证过 seq=9→34→40 的重发），但它在 `billion-context` 关掉 `compaction-basic.auto`、又在代理层自行压缩的环境里不会被触发，所以换成 section。
 
 #### 2.3 T：本轮相关（`agent/pre-step`）
 
@@ -3748,7 +3730,7 @@ ctx.on('session/event', (session, event) => { ... })
 
 选这个钩子的原因：`agent/turn-stopping` 只在 `inbox.nextStep.length === 0` 时派发（`dsh-agent-loop/lib/index.js:791`），有后续 step 就静默不触发，不能当唯一写入口。
 
-去重规则（P8 实测修出来的）：`turn/start` 记 ISO 时间，`turn/end` 先查引擎的 `recent(since)`；**只要这一轮存在 `actor === 'user'` 的变更（模型自己调过工具），整轮跳过抽取**。工具写记 `user`，抽取写记 `inferred`，判据是确定性事实，不需要猜相似度。
+去重规则（宿主接入实测修出来的）：`turn/start` 记 ISO 时间，`turn/end` 先查引擎的 `recent(since)`；**只要这一轮存在 `actor === 'user'` 的变更（模型自己调过工具），整轮跳过抽取**。工具写记 `user`，抽取写记 `inferred`，判据是确定性事实，不需要猜相似度。
 
 8 条句式规则（identity / preference / interaction / request-style / goal / constraint / person / explicit），一条消息最多 3 条，全部 `explicit:false`、`confidence:0.65`，且**不注入 `domain_key`**——兜底通道自己造槽位会和主通道撞车。
 
@@ -3804,7 +3786,7 @@ v1.1 的 S2 证据则在 `.verify/live-s2.db` 那轮：稳定块直接出现在 
 6. 新稳定块：'[长期记忆 · 稳定事实]\n- 交互方式：…'
 ```
 
-判定标准是 P0 里定下的那句话：**"删掉除主表外所有缓存/副本，行为不变"**。`memory_change` 是生命周期审计（P6 要求），`memory_meta` 是键值配置，都不是画像副本；稳定块与相关块是每次查询现算的视图，删一条记忆两个通道同时变——没有双写，也没有需要同步的缓存。
+判定标准是 设计原则里定下的那句话：**"删掉除主表外所有缓存/副本，行为不变"**。`memory_change` 是生命周期审计（生命周期要求），`memory_meta` 是键值配置，都不是画像副本；稳定块与相关块是每次查询现算的视图，删一条记忆两个通道同时变——没有双写，也没有需要同步的缓存。
 
 ### 6. 装进 profile
 
@@ -3891,7 +3873,6 @@ dsh --profile memtest --dump-config | Select-String -Context 0,3 "dsh-attune-mem
 - **工具写入依赖模型主动性**：抽取值只是补位，模型完全不调工具时只能靠 8 条句式规则。
 
 
-
 ## 9. 管理与运维
 
 管理页与 CLI、信任边界、不暴露裸 SQL 的四道闸。
@@ -3928,7 +3909,7 @@ dsh --profile memtest --dump-config | Select-String -Context 0,3 "dsh-attune-mem
 | 概况 | `stats` | `GET /api/stats` | `stats()` | 含不变式自检结果 |
 | 维护 | `tick` | `POST /api/tick` | `tick()` | 只做两条自动归档，绝不删 |
 
-**没有**"把状态改成 superseded"的入口。原因见 `MEMORY_LIFECYCLE.md` §7：删掉状态下拉框，
+**没有**"把状态改成 superseded"的入口。原因见 §7 §7：删掉状态下拉框，
 是因为状态由写管线根据事实变化决定；允许手改状态，等于允许用户手工制造一条"被取代但没有
 取代者"的孤条目，而那正是约束 C 要防的东西。
 
@@ -3942,7 +3923,7 @@ dsh --profile memtest --dump-config | Select-String -Context 0,3 "dsh-attune-mem
 
 ```text
 $ python -m attune_memory.memctl --db .verify/p9demo.db list
-id                        type      subtype       状态          重要性       注入
+id                        type      subtype       状态 重要性 注入
 ------------------------  --------  ------------  ----------  --------  ----------
 m-mwf2bbj3-10             profile   identity      active      key       always      用户叫张三，正在备考考研数学一。
 m-mwf2bbj4-2j             profile   interaction   active      key       always      张三不喜欢先给结论：回答问题要先讲思路/解题切入点，再给具体步骤和结论。
@@ -4079,7 +4060,7 @@ http://127.0.0.1:55665/dsh-attune-memory/
    （`search 不接受这些参数：['lt']；可用：[...]`）。静默忽略会让调用方以为生效了。
 2. **字段白名单**：`write.update()` 只允许改 `content/keywords/importance/injection_policy/confidence/
    domain_key/scope/metadata/subject_name/valid_until`；`type/subtype/subject_type` 变了必须新增一条。
-3. **枚举前置校验**（P9 修的真实缺陷）：以前传 `importance="super-high"` 会一路走到 SQLite，
+3. **枚举前置校验**（管理修的真实缺陷）：以前传 `importance="super-high"` 会一路走到 SQLite，
    用户看到的是 `CHECK constraint failed: importance IN ('key','important','normal','low')`——
    这既是裸表结构泄露，用户也看不懂。现在在 `update()` 里先校验，报
    `importance 只能是 key/important/normal/low 之一，收到 'super-high'`。
@@ -4141,7 +4122,6 @@ cmd /c mklink /J "$p\node_modules\dsh-attune-memory" "<REPO_ROOT>\plugin\dsh-att
   互相矛盾的区间。要改就 supersede 一条新的。
 - **列表一次最多 500 条**。V1 的量级（几十到几百条）够用；再多说明该整理了，而不是该分页了。
 - **`tick` 不会告诉你"哪些条目快过期了"**。它只做两条自动归档；主动提醒属于 V2 的 Dream/维护。
-
 
 
 ## 10. 评估套件
@@ -4276,11 +4256,11 @@ Interaction Model 是灵魂，但它必须**分域**：数学题上的"先讲思
 
 | 判据 | 对应任务书 | 对应的硬约束 / 哲学 |
 | --- | --- | --- |
-| A 不存垃圾 | P10-A | 哲学 ②：Memory ≠ 越多越好 |
-| B 不认错主体 | P10-B | 约束 A：User Model 是逻辑视图，别人的事不能坍缩进来 |
-| C State 更新 | P10-C | 约束 C：冲突是 feature，不悄悄覆盖 |
-| D 不污染 | P10-D | 哲学 ⑤：Interaction Model 要分域；P4 预算与裁剪 |
-| E scope 隔离 | P10-E | 约束 D：scope ∈ {global, domain, task} |
+| A 不存垃圾 | 评估-A | 哲学 ②：Memory ≠ 越多越好 |
+| B 不认错主体 | 评估-B | 约束 A：User Model 是逻辑视图，别人的事不能坍缩进来 |
+| C State 更新 | 评估-C | 约束 C：冲突是 feature，不悄悄覆盖 |
+| D 不污染 | 评估-D | 哲学 ⑤：Interaction Model 要分域；读取管线预算与裁剪 |
+| E scope 隔离 | 评估-E | 约束 D：scope ∈ {global, domain, task} |
 
 ### 4. 真机验证（模型层，A + B 的合体）
 
@@ -4299,7 +4279,7 @@ Interaction Model 是灵魂，但它必须**分域**：数学题上的"先讲思
 落库结果（`memctl list`）：
 
 ```text
-id            type     subtype     状态    重要性   注入        内容
+id            type     subtype     状态 重要性 注入 内容
 m-mwf3bxuz-10 profile  preference  active  normal   on_demand   用户的朋友小王特别喜欢红色，买东西都优先挑红色的。
 ```
 
@@ -4313,8 +4293,8 @@ m-mwf3bxuz-10 profile  preference  active  normal   on_demand   用户的朋友�
 ### 5. 这套评估**不**覆盖什么
 
 - **模型会不会主动调用 `memory_remember`**。这属于"模型行为"，只能真机跑（见
-  `HOST_INTEGRATION.md` §5 的端到端记录），评估套件里不假装能测。
-- **压缩后的重注入**。它需要真实压缩事件，已由 P8 的会话日志单独验证（`seq=82/85`）。
+  §8 §5 的端到端记录），评估套件里不假装能测。
+- **压缩后的重注入**。它需要真实压缩事件，已由 宿主接入的会话日志单独验证（`seq=82/85`）。
 - **并发与多进程**。V1 是单宿主单进程，`BEGIN IMMEDIATE` 已经够用。
 
 ### 6. 怎么加一格
@@ -4324,13 +4304,12 @@ m-mwf3bxuz-10 profile  preference  active  normal   on_demand   用户的朋友�
 这是评估报告，不是断言堆。
 
 
-
 ## 11. 架构决策记录（ADR）
 
 34 条决策，每条含被否决的备选方案与理由。改设计前先看这里，别推翻已经想清楚过的东西。
 
 
-- 状态：初始化。ADR-001 ~ ADR-004 于 P0.5 固化；后续每个重大取舍必须先新增 ADR，再写对应代码。
+- 状态：初始化。ADR-001 ~ ADR-004 于 决策记录固化；后续每个重大取舍必须先新增 ADR，再写对应代码。
 - 格式：每条 ADR 固定四段 —— **Decision / Alternatives / Rejected because / Consequences**。
 - 编号不复用、不删除。被推翻的 ADR 标记 `Superseded by ADR-xxx`，正文保留。
 
@@ -4354,9 +4333,9 @@ V1 的全部记忆数据存放在一个本地 SQLite 数据库文件中，由记
 
 **Consequences**
 - 正面：事务保证写管线（ADD/UPDATE/SUPERSEDE）的原子性；索引让结构化过滤保持廉价；数据是单个可备份、可删除的文件，用户可以整体"忘记一切"。
-- 正面：schema 是显式的，P2 的字段与约束可以被数据库强制（`CHECK`、`UNIQUE`、外键式引用），而不是靠应用层自觉。
+- 正面：schema 是显式的，数据模型的字段与约束可以被数据库强制（`CHECK`、`UNIQUE`、外键式引用），而不是靠应用层自觉。
 - 负面：SQLite 的全文检索与中文分词能力有限，V1 只能用 `LIKE` / 关键词表实现词法匹配（见 ADR-002）。
-- 负面：需要处理 WAL、busy timeout、schema 迁移版本号等工程细节；这些细节在 P7 实现中显式处理。
+- 负面：需要处理 WAL、busy timeout、schema 迁移版本号等工程细节；这些细节在 引擎实现实现中显式处理。
 - 影响：记忆数据库文件的路径由 `DSH_HOME` 派生，与宿主环境绑定但不与某个会话绑定——记忆必须跨会话存活，这是它存在的意义。
 
 ---
@@ -4379,9 +4358,9 @@ V1 的检索链路完全由三部分组成：结构化过滤（主体、类型�
 **Consequences**
 - 正面：检索完全可解释——每条命中都能说明"因为命中关键词 X、类型匹配、状态为 active、领域匹配"。
 - 正面：零外部依赖，离线可用，性能与记忆条数近似线性（V1 量级数百至数千条，可接受）。
-- 负面：同义改写召回弱（"考研" vs "研究生入学考试"）。缓解手段：写入侧在 `metadata` 中保存规范化的关键词/别名（P2、P3），检索侧做别名扩展，而不是引入语义模型。
+- 负面：同义改写召回弱（"考研" vs "研究生入学考试"）。缓解手段：写入侧在 `metadata` 中保存规范化的关键词/别名（数据模型、写入管线），检索侧做别名扩展，而不是引入语义模型。
 - 负面：中文分词质量决定召回质量。V1 用显式关键词 + 子串匹配兜底（中文无空格，子串匹配对短的领域词效果良好）；Bigram / FTS5 记入 V2。
-- 影响：`MEMORY_RETRIEVAL_V1.md`（P5）必须给出具体切分规则与打分公式；`V2_V3_RESERVED.md` 记录向量检索的迁移条件（何时值得做：记忆条数 > N 且同义召回失败率被测量超过阈值）。
+- 影响：§6必须给出具体切分规则与打分公式；§13 记录向量检索的迁移条件（何时值得做：记忆条数 > N 且同义召回失败率被测量超过阈值）。
 
 ---
 
@@ -4404,9 +4383,9 @@ V1 的检索链路完全由三部分组成：结构化过滤（主体、类型�
 **Consequences**
 - 正面：Interaction Model 自动获得全部既有能力：来源追踪、SUPERSEDE、explain、forget、生命周期、评估。
 - 正面：`read_for_context` 只需一次查询即可同时产出"用户是谁"与"该怎么帮他"，天然满足约束 A（单表组合视图）。
-- 负面：主表必须为 `scope` 与 `domain_key` 建立约束（`CHECK`：`subtype='interaction'` 时 `scope` 非空；`scope='domain'` 时 `domain_key` 非空；`scope='global'` 时 `domain_key` 为空），并在写入侧强制校验。P2 的 schema 必须显式包含这些约束。
+- 负面：主表必须为 `scope` 与 `domain_key` 建立约束（`CHECK`：`subtype='interaction'` 时 `scope` 非空；`scope='domain'` 时 `domain_key` 非空；`scope='global'` 时 `domain_key` 为空），并在写入侧强制校验。数据模型的 schema 必须显式包含这些约束。
 - 负面：`type` 上的检索必须能同时按 subtype 与 scope 过滤，索引设计需覆盖 `(user_id, type, subtype, scope, status)` 组合。
-- 影响：P10 评估用例 E 专门验证 scope 隔离；P3 写管线必须包含"scope 归属判定"这一步。
+- 影响：评估评估用例 E 专门验证 scope 隔离；写入管线写管线必须包含"scope 归属判定"这一步。
 
 ---
 
@@ -4429,14 +4408,14 @@ V1 的检索链路完全由三部分组成：结构化过滤（主体、类型�
 - 正面：单一真相源。任意时刻的用户模型都由当前记忆状态决定，`forget` 一条即立刻生效。
 - 正面：组合规则（哪些角色、如何排序、多少条）是纯函数，可以被单元测试与评估套件直接验证。
 - 负面：每次注入都要执行一次查询 + 组合，而不是读一个缓存字段。V1 量级下这是微秒级操作，可接受；若未来成为瓶颈，只能加**写时失效的只读缓存**（且必须有失效保证），不得加"近似副本"。
-- 负面：验收方式是"删掉所有派生数据，系统行为不变"。P8 必须做一次该验证（去掉任何缓存目录后重跑端到端）。
-- 影响：P4 的 Router 输出结构即 User Model 的逻辑形态；P7 的 `read_for_context` 是它的唯一实现入口；P9 的 `list` 复用同一组合逻辑。
+- 负面：验收方式是"删掉所有派生数据，系统行为不变"。宿主接入必须做一次该验证（去掉任何缓存目录后重跑端到端）。
+- 影响：读取管线的 Router 输出结构即 User Model 的逻辑形态；引擎层的 `read_for_context` 是它的唯一实现入口；管理的 `list` 复用同一组合逻辑。
 
 ---
 
 ### 附：后续 ADR 的预留位置
 
-P8（宿主接入）必须为**每个接入点**新增 ADR，说明选择该点的理由、被否决的候选点、以及与 P1 环境分析结论的一致性。候选编号从 ADR-005 起顺延。
+宿主接入（见 §8）必须为**每个接入点**新增 ADR，说明选择该点的理由、被否决的候选点、以及与 环境取证环境分析结论的一致性。候选编号从 ADR-005 起顺延。
 
 ---
 
@@ -4460,16 +4439,16 @@ P8（宿主接入）必须为**每个接入点**新增 ADR，说明选择该点�
 4. 只做工具检索，不做任何主动注入（模型自己决定何时查）。
 
 **Rejected because**
-- 方案 1：`always` 层确实稳定，但 T 层每轮都变；混在一起会让 system prompt 每轮都变，在不支持 `systemPromptUpdate:'in-history'` 的 route 上等于每轮重写 system 节点、从第一个 token 起丢缓存。且 DSH 的 section 文本在 `assemble()` 时求值，早于本轮用户消息入库（P1 §3.3），看不到"这一轮问了什么"。
+- 方案 1：`always` 层确实稳定，但 T 层每轮都变；混在一起会让 system prompt 每轮都变，在不支持 `systemPromptUpdate:'in-history'` 的 route 上等于每轮重写 system 节点、从第一个 token 起丢缓存。且 DSH 的 section 文本在 `assemble()` 时求值，早于本轮用户消息入库（环境取证 §3.3），看不到"这一轮问了什么"。
 - 方案 2：注入的消息会进会话历史并在后续每个请求里重发（`dsh-local-memory` 的"滚雪球"教训），而 `always` 层的内容根本不需要每轮重发。
-- 方案 4：记忆系统的价值在于"用户没问，但它该知道"；纯工具检索把这部分价值全部丢掉，也无法通过 P10 的 D 项（不污染）之外的"该想起来时想起了"检验。
+- 方案 4：记忆系统的价值在于"用户没问，但它该知道"；纯工具检索把这部分价值全部丢掉，也无法通过 评估的 D 项（不污染）之外的"该想起来时想起了"检验。
 
 **Consequences**
 - 正面：S/C 两条通道完全不进会话历史，不产生 token 累积；T 通道每轮只一条、有字符预算上限。
 - 正面：C 通道借用 DSH 自己的压缩恢复逻辑（`RuntimeContextProjection` 监听 `session/event`，被 replace 覆盖即 `retained=null`，下轮 `project()` 重发），不需要我监听压缩事件。
-- 负面：三通道意味着"记忆出现在三个地方"，评估时容易重复计数；P10 的评估必须按通道分别断言。
-- 负面：S/C 通道的文本变化会引起 prompt 变化，需要控制变更频率（C 通道刻意不含时间词，见 P4 §6）。
-- 影响：`MEMORY_READ_PIPELINE.md` 的三通道章节、P8 的 `read_for_context` 返回值结构（`{manual, stable, context, injected_ids}`）与之一一对应。
+- 负面：三通道意味着"记忆出现在三个地方"，评估时容易重复计数；评估的评估必须按通道分别断言。
+- 负面：S/C 通道的文本变化会引起 prompt 变化，需要控制变更频率（C 通道刻意不含时间词，见 §5 第 6 小节）。
+- 影响：§5 的三通道章节、宿主接入的 `read_for_context` 返回值结构（`{manual, stable, context, injected_ids}`）与之一一对应。
 
 ---
 
@@ -4479,7 +4458,7 @@ P8（宿主接入）必须为**每个接入点**新增 ADR，说明选择该点�
 记忆写入有且只有两个入口：
 
 1. **主通道（模型工具）**：`memory_remember` / `memory_update` / `memory_supersede` / `memory_merge` / `memory_forget` / `memory_search` / `memory_explain`。模型在对话中主动调用，写入内容与主体由模型判断。
-2. **辅通道（确定性抽取）**：监听 `session/event` 中的 `turn/end`，对**本回合真人 user 消息**做句式匹配（P3 §1 的 8 类显式句式），命中才写入，每消息 ≤ 3 条，禁止 `always`，禁止覆盖已有 `always` 条目。
+2. **辅通道（确定性抽取）**：监听 `session/event` 中的 `turn/end`，对**本回合真人 user 消息**做句式匹配（写入管线 §1 的 8 类显式句式），命中才写入，每消息 ≤ 3 条，禁止 `always`，禁止覆盖已有 `always` 条目。
 
 **Alternatives**
 1. 只做自动抽取（不提供工具）。
@@ -4492,14 +4471,14 @@ P8（宿主接入）必须为**每个接入点**新增 ADR，说明选择该点�
 - 方案 1：句式抽取只能覆盖"我以后都用中文回答"这类显式声明，覆盖不了"用户在做传热学作业"这种需要理解上下文的判断；而自动抽取一旦判断错，就是**未经用户同意**的长期污染。
 - 方案 2：模型在长对话里会忘记调用工具；显式句式是最高价值的信号（用户明确说了"记住"），漏掉它最可惜。
 - 方案 4：`dsh-agent-loop` 的 `turn-stopping` 只在 `inbox.nextStep.length === 0` 时才被派发（`lib/index.js:791` 附近），一旦模型还有后续 step 就会被跳过；用它当唯一写点会静默丢写。
-- 方案 5：反思 turn 会把一次对话变成两次模型调用，成本翻倍且会打断用户；V1 明确推迟到 V2（`ADOPTION_DECISION_TABLE.md` B4）——而且它解决的是"回忆质量"，不是"写入可靠性"。
+- 方案 5：反思 turn 会把一次对话变成两次模型调用，成本翻倍且会打断用户；V1 明确推迟到 V2（§12 B4）——而且它解决的是"回忆质量"，不是"写入可靠性"。
 
 **Consequences**
 - 正面：写入语义与"谁最懂这句话的意思"对齐——理解交模型，落库的机械判断（等价/互斥/取代）交引擎。
 - 正面：`turn/end` 是纯观察者，不阻塞回合结束，也不改会话内容；抽取失败只是少记一条，不影响对话。
-- 负面：模型可能滥用工具，把一次性任务写进长期记忆；靠工具描述里的准入规则 + 引擎的 Value Gate 双重拦截（P10 的 A 项就是测这个）。
+- 负面：模型可能滥用工具，把一次性任务写进长期记忆；靠工具描述里的准入规则 + 引擎的 Value Gate 双重拦截（评估的 A 项就是测这个）。
 - 负面：`turn/end` 抽取需要在写入前查重，否则重复句式会反复 TOUCH；引擎的 `consider()` 已保证幂等（等价 → TOUCH）。
-- 影响：`MEMORY_WRITE_PIPELINE.md` §1 的两个入口；P8 的写入验证必须两条通道分别跑通。
+- 影响：§4 §1 的两个入口；宿主接入的写入验证必须两条通道分别跑通。
 
 ---
 
@@ -4530,14 +4509,14 @@ T 通道的记忆注入块被压缩遮蔽后，**不在压缩时抢救**，而�
 - 正面：重建走的是和普通轮完全相同的代码路径，不存在"压缩专用注入逻辑"这种第二套实现。
 - 负面：重建发生在**下一轮**，如果用户压缩完就不再说话，记忆不会立刻回到上下文（可接受：没人看）。
 - 负面：`reinjectPending` 是内存状态，插件重启即丢；此时压缩已经发生，记忆只会在下一轮按常规检索重新出现（可接受，有退路）。
-- 影响：P8 的验证清单里"压缩后重注入"必须单独验证，且要验证**不重复注入**（见 `HOST_INTEGRATION.md` §5）。
+- 影响：宿主接入的验证清单里"压缩后重注入"必须单独验证，且要验证**不重复注入**（见 §8 §5）。
 
 ---
 
 ### ADR-008：引擎作为常驻 Python 子进程，stdio JSON-RPC 通信
 
 **Decision**
-记忆引擎（P7 的 `engine/`）以**独立 Python 进程**运行，插件通过 `spawn("python", ["-m","attune_memory.rpc", dbPath])` 启动一次并常驻；协议是一行 JSON 请求 / 一行 JSON 响应，UTF-8 编码。插件侧维护请求 id、超时与重启（进程死了下次调用重启），全部调用 fail-open。
+记忆引擎（引擎层的 `engine/`）以**独立 Python 进程**运行，插件通过 `spawn("python", ["-m","attune_memory.rpc", dbPath])` 启动一次并常驻；协议是一行 JSON 请求 / 一行 JSON 响应，UTF-8 编码。插件侧维护请求 id、超时与重启（进程死了下次调用重启），全部调用 fail-open。
 
 **Alternatives**
 1. 把引擎逻辑用 JS 重写进插件（与 DSH 同进程）。
@@ -4547,17 +4526,17 @@ T 通道的记忆注入块被压缩遮蔽后，**不在压缩时抢救**，而�
 5. 常驻子进程 + stdio（选中）。
 
 **Rejected because**
-- 方案 1：SQLite 里那套事务、时间轴、不变式检查要重写一遍；更要紧的是"引擎可独立测试、可脱离 harness 跑"是 P7 的硬要求，重写进 JS 后这条约束就名存实亡。
+- 方案 1：SQLite 里那套事务、时间轴、不变式检查要重写一遍；更要紧的是"引擎可独立测试、可脱离 harness 跑"是 引擎层的硬要求，重写进 JS 后这条约束就名存实亡。
 - 方案 2：`python-shell`/`ffi` 类方案要绑 CPython ABI，DSH 升级 Electron 即碎；进程内嵌还意味着引擎崩溃会拖垮宿主。
 - 方案 3：要多守一个端口、加一层鉴权（`dsh-local-memory` 为此必须调 `connection.requestRejection`），且 HTTP 无法天然背压；stdio 的阻塞写天然限流。
-- 方案 4：Python 冷启动约 60–120ms，而注入检索要求 < 50ms（P5 §6）；每轮一次会让对话明显变钝。
+- 方案 4：Python 冷启动约 60–120ms，而注入检索要求 < 50ms（检索 §6）；每轮一次会让对话明显变钝。
 
 **Consequences**
 - 正面：引擎崩溃 = 子进程退出，插件 `catch` 后返回空记忆、对话继续（fail-open）。
-- 正面：引擎可被 `python -m unittest` 独立测试、可被 `python -m attune_memory.rpc` 手工驱动，P9 的管理界面也能复用同一协议。
+- 正面：引擎可被 `python -m unittest` 独立测试、可被 `python -m attune_memory.rpc` 手工驱动，管理的管理界面也能复用同一协议。
 - 负面：多一个进程要管（启动、超时、重启、退出时 kill）；`stdin` 写入需要串行化，避免两个请求的响应交错。
-- 负面：Windows 上必须显式把 stdin/stdout 设成 UTF-8（P7 实测：默认 cp936 会让中文请求变成孤立代理字符）。该修复已在 `rpc.py` 的 `main()` 里。
-- 影响：`engine/README.md` 的"当子进程用"一节；P8 插件里的 `EngineClient` 类。
+- 负面：Windows 上必须显式把 stdin/stdout 设成 UTF-8（引擎实现实测：默认 cp936 会让中文请求变成孤立代理字符）。该修复已在 `rpc.py` 的 `main()` 里。
+- 影响：`engine/README.md` 的"当子进程用"一节；宿主侧插件里的 `EngineClient` 类。
 
 ---
 
@@ -4582,7 +4561,7 @@ T 通道的记忆注入块被压缩遮蔽后，**不在压缩时抢救**，而�
 - 正面：数据库是单个可备份文件，用户能整体删除（"忘记一切"）。
 - 负面：跨工作区检索需要 `domain_key` 的层级约定（`study` 是 `study.math` 的父域），靠 `domain_match()` 的前缀规则实现，写错前缀就退化成"没有领域"。
 - 负面：库文件在 `$DSH_HOME` 下，用户换机器需要手动迁移；V1 不做同步。
-- 影响：P2 §6、P5 §2.3 的 ContextMatch 表；`HOST_INTEGRATION.md` 的路径约定。
+- 影响：数据模型 §6、检索 §2.3 的 ContextMatch 表；§8 的路径约定。
 
 ---
 
@@ -4610,7 +4589,7 @@ createUserMessage({
 **Rejected because**
 - 方案 1：记忆块在最前面、用户问题在最后，模型容易把"记忆"当成上一轮对话的一部分；而 `dsh-agent-loop` 的 `preStep` fallback 恰好把 runtime-context 追加在**最后**（`lib/index.js:690-697`），说明官方认为"补充信息应在问题之后"。记忆的语义介于两者之间：它是**背景**，应贴在问题前面。
 - 方案 2：改写用户原话会让会话日志失真——用户回看历史时看到的不是自己说的话；且 `user/message` 是 surface 节点，改写会破坏"日志可 replay"的契约。
-- 方案 3：`developer/message` 在部分 provider 上不被支持或被降级为 system，行为不可控（P1 §6 未确认，记入 UNKNOWN）；user 角色是所有 route 都保证支持的。
+- 方案 3：`developer/message` 在部分 provider 上不被支持或被降级为 system，行为不可控（环境取证 §6 未确认，记入 UNKNOWN）；user 角色是所有 route 都保证支持的。
 - 方案 4：`runtime-context` 是 DSH 自己的通道，其 `retained` 状态机（`RuntimeContextProjection`）按单条快照管理；我混进去会与 C 通道的快照互相覆盖（官方 `project()` 一次只产出一条快照）。而且 `source.kind` 被 DSH 用于"这条消息是运行时事实"，语义不同。
 
 **Consequences**
@@ -4618,7 +4597,7 @@ createUserMessage({
 - 正面：`source.kind` 必填——`dsh-agent-instructions` 会无保护地读 `message.source.kind`（`lib/index.js:1280`），缺了直接 TypeError 让整轮在第一个 step 前死掉。
 - 负面：注入块会进会话历史并被后续请求重发；靠"每轮只注入新增内容"的去重集合控制增长，压缩后由 ADR-007 重建。
 - 负面：`messages` 是 readonly 数组，必须整体新建（`[...decision.messages]` 后 splice），不能原地改。
-- 影响：P4 §6 的渲染格式、P1 §3 的三条硬约束、P8 的 `injectRecall()` 实现。
+- 影响：读取管线 §6 的渲染格式、环境取证 §3 的三条硬约束、宿主接入的 `injectRecall()` 实现。
 
 ---
 
@@ -4635,13 +4614,13 @@ T 通道维护每会话的 `Set<contentHash>`（`hash(memoryId + content)`），
 
 **Rejected because**
 - 方案 1：同一批记忆每轮重复进历史，token 线性增长（`meow-memory` 与 `dsh-local-memory` 都踩过"滚雪球"）。
-- 方案 2：压缩把注入块遮蔽后，`memoryId` 仍在集合里 → 记忆永久不再出现，且没有任何报错。这正是 `dsh-local-memory` 的真实缺陷（P1 §8 已记录），也是本系统必须避免的那类"静默失效"。
+- 方案 2：压缩把注入块遮蔽后，`memoryId` 仍在集合里 → 记忆永久不再出现，且没有任何报错。这正是 `dsh-local-memory` 的真实缺陷（环境取证 §8 已记录），也是本系统必须避免的那类"静默失效"。
 - 方案 4：模型在长对话里会"忘了"早期注入的内容，而压缩前这些内容仍在上下文里；只在压缩后重建是更省的折中。
 
 **Consequences**
 - 正面：正常情况下 token 只增一轮；压缩后恰好重建一次，覆盖"摘要丢细节"的损失。
 - 负面：哈希在内存里，插件重启即丢 → 重启后首轮会把 Top-K 重新注入一遍（可接受，最多一轮冗余）。
-- 影响：`HOST_INTEGRATION.md` §4 的去重说明；P10 的 D 项（不污染）需要断言"第二轮不再重复注入"。
+- 影响：§8 §4 的去重说明；评估的 D 项（不污染）需要断言"第二轮不再重复注入"。
 
 ---
 
@@ -4650,7 +4629,7 @@ T 通道维护每会话的 `Set<contentHash>`（`hash(memoryId + content)`），
 **Decision**
 T 通道的实现位置是 `ctx.on('agent/pre-step', async (payload, next) => ...)`：先 `await next()` 拿到上游 decision，若 `kind === 'enter'`，把一条 `source.kind = "dsh-attune-memory"` 的 user 消息 **splice 到最后一条真人 user 消息之前**，再返回新的 decision。S/C 两通道分别用 `ctx.systemPrompt.section()` 与 `ctx.systemPrompt.context()` 注册（见 ADR-005）。
 
-**依据（P1 取证）**
+**依据（环境取证取证）**
 - `dsh-agent-loop/lib/index.js:685`：`decision = await dispatch.waterfall("agent/pre-step", {messages: claimed, ...})` —— decision 里的 `messages` 才是"本步真的要送进模型的批次"。
 - 同文件 `:862` 起：这些消息在被返回之后才 `session.append("user/message", message, {surfaceOp:"append"})` 写进会话。
 - 同文件 `:670`（claim）→ `:679`（`assemble`）→ `:862`（append）的顺序，说明 `assemble()` 早于用户消息入库，所以 **section/context 的 `text()` 拿不到"本轮问题"**，按问题检索只能放在 pre-step。
@@ -4681,7 +4660,7 @@ T 通道的实现位置是 `ctx.on('agent/pre-step', async (payload, next) => ..
 **Decision**
 C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.systemPrompt.context({name:'memory:stable', order:200, text:() => stableText})`。DSH 会把所有 context provider 合并成**一条** `source.kind === "runtime-context"` 的 user 快照；当快照被压缩 replace 覆盖时，`RuntimeContextProjection` 把 `retained` 置为 `null`，下一次 `project()` 自动重发。
 
-**依据（P1 取证）**
+**依据（环境取证取证）**
 - `dsh-system-prompt/lib/index.js:281`（`context()` 注册）、`:326`（`refreshContext` 每次 admission 前重读文本）。
 - `dsh-agent-loop/lib/index.js:297-349`（`RuntimeContextProjection`）：`:324` 在 `isReplacementSurfaceEvent(event) && event.sourceEventSeqs.includes(retained.seq)` 时 `this.retained = null`；`:333` 的 `project()` 在 `retained === null` 且文本非空时重新产出消息。
 - 真实会话证据：`seq=9`（首轮快照含 `[长期记忆 · 稳定事实]`）→ `seq=34`（compaction replace）→ `seq=40`（快照自动重发，仍含稳定块）。
@@ -4692,15 +4671,15 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 3. 复用 runtime-context 通道（选中）。
 
 **Rejected because**
-- 方案 1：稳定事实一变就要改 system prompt 文本，非 capable route 上会**从头丢 KV 缓存**（P1 §2 的 prompt 准入规则）；而且 section 文本变化每轮都触发重写。
+- 方案 1：稳定事实一变就要改 system prompt 文本，非 capable route 上会**从头丢 KV 缓存**（环境取证 §2 的 prompt 准入规则）；而且 section 文本变化每轮都触发重写。
 - 方案 2：稳定块本来就是"每轮都该在"的内容，每轮注入会把它写进历史 N 次（正是 `meow-memory` 早期版本"滚雪球"的成因）。
-- 方案 3 的前提是"文本不能含时间词"：一旦含时间戳，`refreshContext` 每轮算出不同文本，DSH 就会每轮追加一条新快照。这条约束写在 P4 §6，并由 `stable_block()` 的构造保证。
+- 方案 3 的前提是"文本不能含时间词"：一旦含时间戳，`refreshContext` 每轮算出不同文本，DSH 就会每轮追加一条新快照。这条约束写在 读取管线 §6，并由 `stable_block()` 的构造保证。
 
 **Consequences**
 - 正面：压缩后的常驻记忆恢复**不写一行抢救代码**，直接受益于官方状态机；KV 友好（文本不变则 system 段与快照都不动）。
 - 负面：与 DSH 的 runtime-context 共用一条消息，模型看到的是"运行期上下文"整体，我的稳定块只是其中一段；这要求格式上自解释（`[长期记忆 · 稳定事实]` 标题）。
 - 负面：`includeRuntimeContext: false` 或被 scoped suppressor 抑制时，C 通道会一起消失（T 通道仍在）。
-- 影响：P4 §3.1 的准入条件（长度 ≤80 字、置信度 ≥0.85）本质是"这条内容配不配待在每轮都发的快照里"。
+- 影响：读取管线 §3.1 的准入条件（长度 ≤80 字、置信度 ≥0.85）本质是"这条内容配不配待在每轮都发的快照里"。
 
 ---
 
@@ -4709,10 +4688,10 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 **Decision**
 兜底写入（确定性句式抽取）挂在 `ctx.on('session/event', (session, event) => ...)` 的 `turn/end` 上，配合 `turn/start` 记时间戳；执行前先 `engine.call('recent', {since})`，**只要这一轮有 `actor === 'user'` 的变更（即模型自己调工具写过），就整轮跳过抽取**。
 
-**依据（P1 + P8 实测）**
+**依据（环境取证 + 宿主接入实测）**
 - `dsh-agent-loop/lib/index.js:791`：`agent/turn-stopping` 只在 `inbox.nextStep.length === 0` 时派发，有后续 step 就静默不触发 → 不能作为唯一写入口（ADR-006）。
 - `dsh-session/lib/index.js:1596-1605`：`session/event` 观察者按 `(session, event)` 派发，`event.type` / `event.data` 可用。
-- P8 首跑真实缺陷：同一句自我介绍被写了 **4 条**（模型 2 条 + 抽取 2 条），因为抽取通道注入的 `domain_key` 与模型写的不同，`same_slot` 判据失效。修复后同一任务只留 2 条，`problems: []`。
+- 宿主接入首跑真实缺陷：同一句自我介绍被写了 **4 条**（模型 2 条 + 抽取 2 条），因为抽取通道注入的 `domain_key` 与模型写的不同，`same_slot` 判据失效。修复后同一任务只留 2 条，`problems: []`。
 
 **Alternatives**
 1. 只用模型工具写，完全不要兜底抽取。
@@ -4722,15 +4701,15 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 
 **Rejected because**
 - 方案 1：模型不一定调用工具，"我叫张三"这种明确自述漏掉就永久丢失。
-- 方案 2：`same_slot` 的槽位含 `domain_key`，两条通道对领域的判断天然不一致（模型给 NULL，抽取给 study.math），判据挡不住 —— 这是 P8 实测到的。
+- 方案 2：`same_slot` 的槽位含 `domain_key`，两条通道对领域的判断天然不一致（模型给 NULL，抽取给 study.math），判据挡不住 —— 这是 宿主接入实测到的。
 - 方案 4：`find_similar` 是文本相似度，阈值之内才拦得住；本轮模型写的可能是改述（"用户叫张三"vs"我叫张三"），相似度不一定够。而"这一轮模型动过手"是确定性事实，不需要猜。
 
 **Consequences**
 - 正面：双通道不会重复落库；抽取值永远只是"模型没管的时候"的补位。
-- 正面：`memory_change` 本来就是生命周期必需的表（P6 可解释性），此处零新增存储。
+- 正面：`memory_change` 本来就是生命周期必需的表（见 §7），此处零新增存储。
 - 负面：`recent()` 多一次 RPC 往返（<5ms，且只在回合结束时发生）。
 - 负面：模型若在同一回合里只写了无关记忆，抽取也会被跳过（宁可漏一条，不可重复一条）。
-- 影响：`HOST_INTEGRATION.md` §4；P10 的 A/B 项需要覆盖"模型写了就不重复写"。
+- 影响：§8 §4；评估的 A/B 项需要覆盖"模型写了就不重复写"。
 
 ---
 
@@ -4749,14 +4728,14 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 **Rejected because**
 - 方案 1：页面是纯静态资源，不含任何记忆数据；拦它只会让"从书签/新标签直达"变成 401，而安全性没有任何提升（数据接口本来就是分开的）。
 - 方案 2：会引入端口冲突、单实例锁、鉴权与 Cookie 域、跨源问题——这些宿主已经全解决了。`dsh-local-memory` 1.x 就是被这套东西拖垮后才改回插件内路由的。
-- 方案 3：需要客户端 bundle 构建链（`dsh.client` + ModuleLoader），P9 要的是"能用"，不是"好看"；V3 若做可视化再升级。
+- 方案 3：需要客户端 bundle 构建链（`dsh.client` + ModuleLoader），管理要的是"能用"，不是"好看"；V3 若做可视化再升级。
 
 **Consequences**
 - 正面：与 GUI 同源同端口，浏览器已有的会话 Cookie 直接生效，用户不需要额外登录。
 - 正面：不可信来源无法读写记忆库——没有这道闸，任何网页都能 `fetch('http://127.0.0.1:<port>/dsh-attune-memory/api/forget')`。
 - 负面：页面 URL 可被任何人打开，但打开只会看到"列表加载失败（401）"。
 - 负面：Cordis 的 `inject` 让管理页依赖 `connection`+`webServer`；无 Web 的组合（headless）里这两个服务缺席，管理页不挂载——所以用 `ctx.inject([...], cb)` 而不是写进顶层 `inject`，否则记忆本体在 headless 里也会因为缺服务而不加载。
-- 影响：`MEMORY_ADMIN.md` §3.3；`plugin/dsh-attune-memory/lib/routes.js` 的 `rejected()`。
+- 影响：§9 §3.3；`plugin/dsh-attune-memory/lib/routes.js` 的 `rejected()`。
 
 
 ---
@@ -4777,14 +4756,14 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 **Rejected because**
 - 方案 1 会污染所有调用方：模型主动 `memory_search` 时，词法命中是唯一可解释的依据；给它塞"因为你在 study.math 域"这种结果，模型无法判断该不该信。
 - 方案 2 把责任推给模型，而"用户问极限题、约定写的是讲数学题"这类缺口本质上是**词的粒度**问题，不是关键词缺失。
-- 方案 3 让 Interaction Model 的分域能力形同虚设——最该起作用的地方恰好永不生效（P10 E 场景实测）。
+- 方案 3 让 Interaction Model 的分域能力形同虚设——最该起作用的地方恰好永不生效（评估 E 场景实测）。
 
 **Consequences**
 - 正面：`contextual` 的 profile 记忆（"他在某类题上卡在哪"）终于能进注入块；领域约定不再依赖词面重合。
 - 正面：`search()` 语义不变，模型侧的检索仍然可解释、可复现。
 - 负面：领域识别错会把不该出现的约定带进来——所以只认"明确识别出的 domain"，且置信度 ≥0.8。
 - 负面：`context_block` 多一次按域查询（<2ms，索引 `idx_mem_type_domain` 命中）。
-- 影响：`MEMORY_READ_PIPELINE.md` §3；`DEFECT_LOG.md` 第 4、5 条；`tests` 的 `TestDomainRules`。
+- 影响：§5 §3；《内部版本的工作、修改与缺陷》§2 第 4、5 条；`tests` 的 `TestDomainRules`。
 
 ---
 
@@ -4808,7 +4787,7 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 - 正面：可以记录"有明确终点的状态"，不必等到它真的结束时再改。
 - 正面：错误在写入时就炸，且报错说清哪个值不合法。
 - 负面：模型可能给一个"看起来合理但实际错误的"时间——这属于内容判断错误，写管线不负责猜，靠 `explain` 可查。
-- 影响：`MEMORY_SCHEMA_V1.md` §4；`DEFECT_LOG.md` 第 2 条；`rpc._SPEC`、`write.validate()`。
+- 影响：§3 §4；《内部版本的工作、修改与缺陷》§2 第 2 条；`rpc._SPEC`、`write.validate()`。
 
 ---
 
@@ -4833,7 +4812,7 @@ C 通道不新开消息、不改 system prompt 文本，而是注册一个 `ctx.
 - 正面：重要性只调排序，符合"importance 与 injection_policy 独立"（约束 B）。
 - 正面：过期条目仍能被检索到并带 `⚠` 说明，用户/模型可以自己判断，而不是被系统悄悄藏起来。
 - 负面：无关条目更容易擦线进入候选——由 Top-K 与预算裁剪兜住（`k_default=5`）。
-- 影响：`MEMORY_RETRIEVAL_V1.md` §3；`DEFECT_LOG.md` 第 3 条。
+- 影响：§6 §3；《内部版本的工作、修改与缺陷》§2 第 3 条。
 ---
 
 ### ADR-019 稳定事实放进 system prompt 的 section，不再借用 runtime-context 快照
@@ -4849,7 +4828,7 @@ T 通道的去重从"每会话每内容一次"改为"记轮次，`STALE_TURNS=8`
 3. 什么都不改，接受"被代理层折叠后不再出现"。
 
 **Rejected because**
-- 方案 1 的恢复机制本身没错（P8 实测 seq=9 → 34 被 replace → 40 自动重发），但它**只在 DSH 自己的压缩器发声时**才触发。实机桌面 profile 装了 `billion-context`：`dsh.bundle.patch.yml` 把 `compaction-basic` 的 `auto` 设为 `false`、并在 preset 里禁用 `dsh-compaction-basic`/`dsh-command-compact`；压缩改由代理层在请求体上完成，不发任何会话事件。于是 `compaction/end` 与 `retained=null` 两条路径在这台机器上都不会发生——`context` 快照被折掉后永久消失且无报错。
+- 方案 1 的恢复机制本身没错（宿主接入实测 seq=9 → 34 被 replace → 40 自动重发），但它**只在 DSH 自己的压缩器发声时**才触发。实机桌面 profile 装了 `billion-context`：`dsh.bundle.patch.yml` 把 `compaction-basic` 的 `auto` 设为 `false`、并在 preset 里禁用 `dsh-compaction-basic`/`dsh-command-compact`；压缩改由代理层在请求体上完成，不发任何会话事件。于是 `compaction/end` 与 `retained=null` 两条路径在这台机器上都不会发生——`context` 快照被折掉后永久消失且无报错。
 - 方案 2 会每轮新增一条消息（历史滚雪球），且位置在真人消息之后，违反"背景在问题之前"。
 - 方案 3 等于承认"记忆可能静默失效"，这与哲学②"可纠正"直接冲突：用户以为记住了，模型看不到，且无人知道。
 
@@ -4859,7 +4838,7 @@ T 通道的去重从"每会话每内容一次"改为"记轮次，`STALE_TURNS=8`
 - 负面：S2 文本变化会让 system 节点重写一次，KV 前缀从那里失效——所以 `stable_block()` 必须不含时间词、条数与字数卡紧（≤6 条/500 字）。
 - 负面：T 通道的 8 轮重发兜底意味着"被折叠后最多 8 轮看不到"，不是零窗口。
 - 残留风险：若代理层连 system 字段也压缩，本 ADR 的绕行失效，最后只剩"模型主动 `memory_search`"一条路。
-- 影响：`plugin/dsh-attune-memory/lib/index.js`（S2 注册）、`lib/recall.js`（`STALE_TURNS`）、`MEMORY_READ_PIPELINE.md` §1、`HOST_INTEGRATION.md` §2.2、`UNKNOWN_LIST.md` U-003。
+- 影响：`plugin/dsh-attune-memory/lib/index.js`（S2 注册）、`lib/recall.js`（`STALE_TURNS`）、§5 §1、§8 §2.2、§13 U-003。
 ---
 
 ### ADR-020 用"宿主契约测试"守住五条我们依赖的宿主行为，而不是靠文档
@@ -4872,7 +4851,7 @@ H4 压缩后的下一轮仍能注入（`compaction/end` 成功之后）；H5 注
 `--offline` 只跑结构断言（2 秒、不需要 DSH、可进门禁），全量跑真模型（约 1 分钟）。
 
 **Alternatives**
-1. 把五条假设写进 `HOST_INTEGRATION.md`，靠版本升级时人工复核。
+1. 把五条假设写进 §8，靠版本升级时人工复核。
 2. 在插件里加 verbose 日志，出问题时翻日志。
 3. 用单元测试 mock 一个 `decision` 对象来断言。
 
@@ -4887,7 +4866,7 @@ H4 压缩后的下一轮仍能注入（`compaction/end` 成功之后）；H5 注
 - 负面：全量测试要真调模型（时间 + token 成本），因此不进每次提交的门禁，只进门禁离线子集 + 升级后的手动全量。
 - 负面：多了一个 profile（`profiles/contract`）和一个探针包要维护。
 - 实测记录（同样是"测试先暴露自己"的例子）：①`summarize()` 曾因形状假设错误把成功的注入读成"没有注入"；②压缩在历史太薄时会被宿主拒绝并只在 `compaction/end.data.error` 里说明（`summary is not smaller than the shadowed content (702 >= 518)`），因此编排器必须垫一轮长回答、并且把"压缩被放弃"判为跳过而不是通过。
-- 影响：`V1_1_IMPLEMENTATION_PLAN.md` 模块 1、`HOST_INTEGRATION.md`、`.publish` 发布清单（测试目录随插件一起发）。
+- 影响：《内部版本的工作、修改与缺陷》§1、§8、`.publish` 发布清单（测试目录随插件一起发）。
 
 ---
 
@@ -4997,7 +4976,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 正面：所有观测都不进模型上下文（只经 `memory_probe` 按需读取），不稀释上下文。
 - 负面：库会随使用增长（上限靠裁剪控制），并且库里有用户原话片段 → INSTALL/README 必须写明这一点。
 - 负面：`inject_count` 的自增依赖插件回执，headless 跨进程核对不到；已在 ADR-021 记录。
-- 影响：`engine/attune_memory/{db,store,manager,rpc,read,write}.py`、`plugin/.../lib/{routes,ui,tools}.js`、`MEMORY_ADMIN.md`。
+- 影响：`engine/attune_memory/{db,store,manager,rpc,read,write}.py`、`plugin/.../lib/{routes,ui,tools}.js`、§9。
 
 ---
 
@@ -5016,7 +4995,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 3. 页面也过栅栏。
 
 **Rejected because**
-- 方案 1 是本项目出现过的最严重的安全缺陷（三方审查列为 P0）：这些接口能列全部记忆、读原文、
+- 方案 1 是本项目出现过的最严重的安全缺陷（三方审查列为 设计原则）：这些接口能列全部记忆、读原文、
   看 explain 时间轴、看最近查询与被拒候选原话、改/忘/恢复/物理删除。任意网页的 `fetch` 只要
   能打到本机端口，就能在没有判定结果的情况下读写用户长期记忆——而"没有判定结果"恰恰是
   宿主版本漂移、服务未注入、插件加载顺序异常时最常见的情形。
@@ -5052,7 +5031,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
   而且写成 profile 之后不会被 state 的过期规则处理，永远不会自动归档。
 - 方案 2 会把"模型措辞不符合我的词表"当成错误，误伤率高；类型最终仍需语义判断，硬拦会让用户丢记忆。
 - 方案 3 违反"事实只有一份"（约束 A）：读侧猜类型等于在查询时制造第二套语义，explain 也会自相矛盾。
-- always 白名单选 `identity/interaction/constraint`，与 P4 的 always 准入四条件（稳定 ∩ 高置信 ∩ 跨任务有用 ∩
+- always 白名单选 `identity/interaction/constraint`，与 读取管线的 always 准入四条件（稳定 ∩ 高置信 ∩ 跨任务有用 ∩
   不污染）对齐：身份、怎么跟这个人说话、长期约束才配每轮出现；"喜欢红色"只在一部分话题里成立。
 
 **Consequences**
@@ -5061,7 +5040,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 负面：既有数据里如果有 `profile/preference + always` 的旧行，读取仍然生效（约束只作用于新写入）；
   需要的话用 `memctl update` 逐条降级。
 - 负面：`type_hint` 是启发式，会有误报（例如"复习资料我习惯用 PDF"里的"复习"）；所以只留痕、不拦。
-- 影响：`engine/attune_memory/{const,write}.py`、`engine/tests/test_engine.py`（新增 7 例）、`docs/MEMORY_SCHEMA_V1.md` 的字段说明。
+- 影响：`engine/attune_memory/{const,write}.py`、`engine/tests/test_engine.py`（新增 7 例）、§3 的字段说明。
 
 ### ADR-027 候选与落库拆开、Value Gate 句式化、抽取的 interaction 收窄、检索三阶段
 
@@ -5199,7 +5178,6 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 影响：`plugin/dsh-attune-memory/lib/recall.js`、`test/recall.test.mjs`（新增"历史里还在 → inject_visible"断言）。
 
 
-
 ## 12. 采用决策表
 
 36 项外部机制的取舍：采用 / 改造 / 推迟 / 拒绝，每项都有结论。
@@ -5229,15 +5207,15 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 | # | 机制 | 原实现 | 解决什么问题 | V1 是否采用 | 为什么 / 改造成什么 |
 | --- | --- | --- | --- | --- | --- |
 | A1 | 首轮快照全量注入 | `meow-memory`：第一条真人消息前插一条 plugin snapshot（soul/user/rules/导引），第二轮起才关键词命中 | 让模型"开局就知道这个人是谁"，避免第一轮裸跑 | **改造** | 保留"开局给稳定画像"的意图，但不做全量快照：改为**常驻层（`systemPrompt.context`）+ 首轮 contextual 检索**。理由：快照内容越多，越容易过期、越容易污染上下文（违反哲学②④）；且全量快照在 ACP 折叠层下无法保证长期存活 |
-| A2 | 每轮关键词命中 top-K | `meow-memory` top-2（基于条目 keywords）；`dsh-local-memory` 每轮检索、pinned 保送最多 3 条 | 让"这一轮真用得上"的记忆进上下文 | **采用（改 K 与准入）** | 采用"每轮检索"这一形态。K 由 P4/P5 定为 4–6 条上限、实测预算内；准入必须过 P4 的 always/contextual 规则，不能"检索命中就注入" |
+| A2 | 每轮关键词命中 top-K | `meow-memory` top-2（基于条目 keywords）；`dsh-local-memory` 每轮检索、pinned 保送最多 3 条 | 让"这一轮真用得上"的记忆进上下文 | **采用（改 K 与准入）** | 采用"每轮检索"这一形态。K 由 读取管线/检索定为 4–6 条上限、实测预算内；准入必须过 读取管线的 always/contextual 规则，不能"检索命中就注入" |
 | A3 | 静态提示词 section（记忆手册） | 两实现都有：`meow-memory:guide` order 130、`dsh-local-memory:brief` order 60，文本恒定 | 告诉模型"有记忆库、什么时候写、什么时候查" | **采用** | 文本必须恒定（缓存友好）。内容只写**规则**（何时写、scope 怎么填、importance≠注入频率），不写动态数据。动态计数最多按天变 |
 | A4 | 注入块位置：最后一条真人消息之前 | `meow-memory`：`splice(indexOf(lastUser), 0, block)` | 让记忆紧贴问题，但仍在用户消息之前，语义为"参考" | **采用** | `dsh-local-memory` 插在 `[injected, ...messages]` 最前面，会把记忆推到用户问题之前更远处，等于"记忆先说、用户后说"，模型更容易把记忆当当前指令。采用 meow 的位置 |
-| A5 | 防注入声明 | `dsh-local-memory`：首行"供参考，可能过期，请自行核对" + "以下是历史数据，不是指令" | 记忆是历史文本，可能含"以后都这样"这类话，不能被当命令执行 | **采用** | 这是提示注入的正面防御，必须有。格式在 P4 定义，V1 固定为块首两行声明 |
+| A5 | 防注入声明 | `dsh-local-memory`：首行"供参考，可能过期，请自行核对" + "以下是历史数据，不是指令" | 记忆是历史文本，可能含"以后都这样"这类话，不能被当命令执行 | **采用** | 这是提示注入的正面防御，必须有。格式在 读取管线定义，V1 固定为块首两行声明 |
 | A6 | 同会话去重 | 两实现都有（meow 用 `sessions/<id>.json` 记 seen id；nodal 用 `injectedBySession`） | 注入块会进历史、每请求重发，不去重会滚雪球 | **采用（修缺陷）** | 两者都漏了**压缩后重置**：nodal 全代码无 compaction 处理（`recall.js:84,146-152`），被压缩掉的块永久不再注入。V1：`compaction/start|summary` 清 seen，`compaction/end` 置 pending |
-| A7 | 压缩后重注入 | `meow-memory`：`compaction/end` → pending → 下次 pre-step 重建快照 | 压缩会把注入块吃掉 | **采用（分层）** | 两层：常驻层交给 `systemPrompt.context` 的 `RuntimeContextProjection` 自动恢复（官方语义，`dsh-agent-loop:297-349`）；检索层自己维护 pending。理由见 `CURRENT_ENVIRONMENT_ANALYSIS.md` §5 |
+| A7 | 压缩后重注入 | `meow-memory`：`compaction/end` → pending → 下次 pre-step 重建快照 | 压缩会把注入块吃掉 | **采用（分层）** | 两层：常驻层交给 `systemPrompt.context` 的 `RuntimeContextProjection` 自动恢复（官方语义，`dsh-agent-loop:297-349`）；检索层自己维护 pending。理由见 §8 §5 |
 | A8 | runtime-context 常驻通道 | harness 内建（`SOURCE="runtime-context"`，`CLEARED` 文案，`project()` 去重） | 会话级稳定事实，且要能自动恢复 | **采用（新发现，两实现都没用）** | 两份参考实现都不知道这条通道，全靠自己拼。用它等于免费获得"去重 + 压缩恢复 + 与时间/工作区上下文合并"。约束：provider 看不到本轮用户消息，只能放稳定事实 |
-| A9 | pinned 记忆每轮保送 | `dsh-local-memory`：pinned 最多 3 条，理由"钉住的是铁律" | 少数铁律不能被检索遗漏 | **改造** | 保留"必送"语义，但用 `injection_policy='always'` 表达（与 `importance` 解耦，遵守约束 B），不新增 `pinned` 字段；数量由 P4 的预算决定而不是硬编码 3 |
-| A10 | Project Anchor（按工作区锚定记忆） | `meow-memory`：每个工作区一个库 `<workspace>\.dsh-meow\memory.db`（`memoryDbPath(workspace, dir='.dsh-meow')`），另在 `DSH_HOME` 存全局层（soul/user/rules）；检索时"全局 + 当前 project 锚定"两路合并；project 另有 `subcategory` 二级分组 | 不同项目的记忆要能分开，不能把 A 项目的约定带到 B 项目 | **改造** | 认可"记忆必须能按项目分区"，但**不**采用"每工作区一个物理库"：①用户画像（profile/state）本来就跨项目，拆库会导致同一事实多份副本（直接违反约束 A）；②库放在工作区会被 git 带出去，个人偏好会泄漏。V1 用**单库 + `domain_key` 结构化列**做逻辑分区，检索时按 `domain_key` 匹配（P5 的 Context Match 因子） |
+| A9 | pinned 记忆每轮保送 | `dsh-local-memory`：pinned 最多 3 条，理由"钉住的是铁律" | 少数铁律不能被检索遗漏 | **改造** | 保留"必送"语义，但用 `injection_policy='always'` 表达（与 `importance` 解耦，遵守约束 B），不新增 `pinned` 字段；数量由 读取管线的预算决定而不是硬编码 3 |
+| A10 | Project Anchor（按工作区锚定记忆） | `meow-memory`：每个工作区一个库 `<workspace>\.dsh-meow\memory.db`（`memoryDbPath(workspace, dir='.dsh-meow')`），另在 `DSH_HOME` 存全局层（soul/user/rules）；检索时"全局 + 当前 project 锚定"两路合并；project 另有 `subcategory` 二级分组 | 不同项目的记忆要能分开，不能把 A 项目的约定带到 B 项目 | **改造** | 认可"记忆必须能按项目分区"，但**不**采用"每工作区一个物理库"：①用户画像（profile/state）本来就跨项目，拆库会导致同一事实多份副本（直接违反约束 A）；②库放在工作区会被 git 带出去，个人偏好会泄漏。V1 用**单库 + `domain_key` 结构化列**做逻辑分区，检索时按 `domain_key` 匹配（检索的 Context Match 因子） |
 | A11 | 每个工作区的 seen 文件 | `meow-memory`：`sessions/<id>.json` 记已注入 id | 重启后仍能去重 | **改造** | seen 集合只需活在一个会话的生命周期内（进程重启后会话历史已经变了，旧 seen 无意义）。V1 放内存 map + 压缩信号重置，不落盘，少一个可能写坏的状态文件 |
 
 ### B. 写入类
@@ -5246,55 +5224,55 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 | --- | --- | --- | --- | --- | --- |
 | B1 | 模型工具写入 | 两实现都把写记忆做成工具（`memory_save` / `memory_remember`），**代码里没有自动抽取** | 判断"值不值得记"需要语义理解，V1 没有 Embedding 也不该每条多调一次模型 | **采用** | 工具是唯一"高质量写入"通道。工具描述要写清 scope / importance / injection_policy 的区别，否则模型会把"重要"写成"每轮注入" |
 | B2 | 常驻提示词"收工自检"纪律 | `dsh-local-memory` `prompt.js:58-74`：改代码/修 bug/发布/装插件/定约定 → 自检"有没有下次可复用、且从代码里看不出来的结论" → 有就存、没有就跳过、别凑数 | 让模型在正确时机主动写，而不靠外部猜 | **采用** | 这是"不存垃圾"（评估用例 A）的第一道闸。改造点：把四条种子偏好（专业/备考/讲法/表达方式）显式列进手册，让模型知道这几类**值得存** |
-| B3 | 确定性自动抽取 | 两实现都没有（meow 的反思轮是另一回事） | 用户说完就走、模型没调工具时，显式陈述会丢 | **改造（新增）** | V1 在 `turn/end` 上做**极窄**的规则抽取：只认显式句式（"我是…/我不…了/以后都…/别再…"），产出 candidate 走 P3 管线（可 IGNORE）。不做通用 NLP，宁可漏 |
+| B3 | 确定性自动抽取 | 两实现都没有（meow 的反思轮是另一回事） | 用户说完就走、模型没调工具时，显式陈述会丢 | **改造（新增）** | V1 在 `turn/end` 上做**极窄**的规则抽取：只认显式句式（"我是…/我不…了/以后都…/别再…"），产出 candidate 走 写入管线管线（可 IGNORE）。不做通用 NLP，宁可漏 |
 | B4 | 反思轮 | `meow-memory`：`agent/turn-stopping` 里数连续工具 step ≥7 且最后不是 `memory_*` → `agent.followup` 开一个独立轮自评 | 长任务干完容易忘记沉淀 | **推迟 V2** | 额外一次模型调用 + 额外一轮对话，对一个"每天几十轮"的个人记忆库来说成本不划算；且 `agent/turn-stopping` 在 inbox 非空时会被跳过（`:797`），可靠性本身要打折。V2 触发条件：评估用例 C 的漏写率 >30% |
 | B5 | UPDATE 追加时间轴 | `dsh-local-memory` `memory_update` 表：不覆盖原文，追加"现在怎么样" | "当时怎么样"和"现在怎么样"都要能查 | **采用** | 正好对应约束 C（冲突是 feature）。V1 落到 `superseded_by` + `valid_from/valid_until`，辅助表存每次变更的原因与来源 |
-| B6 | 相似度查重 + 合并 | `meow-memory` `memory_find_similar`（工具调用前自动去重）；`dsh-local-memory` 明确拒绝模糊合并（"把北京和上海并成一条比重复糟得多"） | 同一件事被记多次 | **改造** | V1：**显式 MERGE 操作**（P3 定义触发条件），绝不做自动模糊合并。候选期用词法相似度 + 结构化同槽位（type+subject+domain 相同才比较），不做语义聚类 |
+| B6 | 相似度查重 + 合并 | `meow-memory` `memory_find_similar`（工具调用前自动去重）；`dsh-local-memory` 明确拒绝模糊合并（"把北京和上海并成一条比重复糟得多"） | 同一件事被记多次 | **改造** | V1：**显式 MERGE 操作**（写入管线定义触发条件），绝不做自动模糊合并。候选期用词法相似度 + 结构化同槽位（type+subject+domain 相同才比较），不做语义聚类 |
 
 ### C. 存储与检索
 
 | # | 机制 | 原实现 | 解决什么问题 | V1 是否采用 | 为什么 / 改造成什么 |
 | --- | --- | --- | --- | --- | --- |
-| C1 | 七层分类（soul/user/project/fact/lesson/topic/rules） | `meow-memory` | 分类越细，检索越准 | **不采用** | 违反任务书 P2 的四角色模型（profile/domain/state/episodic）。七层里 `soul` 与 `rules` 在本任务属于 Interaction Model（profile 的 subtype + scope），`lesson/topic` 属于 episodic/domain 的诉求。多一套并行分类会立刻产生"这条该进哪层"的歧义 |
-| C2 | `kind` 枚举含 `unknown` | `dsh-local-memory`：work/emotion/preference/unknown，加 unknown 因为老数据**不猜** | 分类不确定时不要瞎猜 | **改造** | 采用"不猜"原则，但枚举换成 P2 的 `type`（profile/domain/state/episodic）。`subtype` 与 `domain_key` 允许为空，空即未分类，检索时不禁用 |
-| C3 | importance 用枚举而非 1–5 | `dsh-local-memory`："让模型打 1-5 分不稳定，同名分数不同含义" | 分数不可校验、不可解释 | **改造** | 采用"枚举更稳"的判断，但 V1 schema 需要可与 confidence 相乘的数值（P5 排序公式），所以：**枚举 → 映射到固定数值**，映射表写死在代码里并出面文档（`key=1.0 / important=0.8 / normal=0.5 / low=0.25`），模型只选枚举，不填数字 |
+| C1 | 七层分类（soul/user/project/fact/lesson/topic/rules） | `meow-memory` | 分类越细，检索越准 | **不采用** | 违反任务书 数据模型的四角色模型（profile/domain/state/episodic）。七层里 `soul` 与 `rules` 在本任务属于 Interaction Model（profile 的 subtype + scope），`lesson/topic` 属于 episodic/domain 的诉求。多一套并行分类会立刻产生"这条该进哪层"的歧义 |
+| C2 | `kind` 枚举含 `unknown` | `dsh-local-memory`：work/emotion/preference/unknown，加 unknown 因为老数据**不猜** | 分类不确定时不要瞎猜 | **改造** | 采用"不猜"原则，但枚举换成 数据模型的 `type`（profile/domain/state/episodic）。`subtype` 与 `domain_key` 允许为空，空即未分类，检索时不禁用 |
+| C3 | importance 用枚举而非 1–5 | `dsh-local-memory`："让模型打 1-5 分不稳定，同名分数不同含义" | 分数不可校验、不可解释 | **改造** | 采用"枚举更稳"的判断，但 V1 schema 需要可与 confidence 相乘的数值（检索排序公式），所以：**枚举 → 映射到固定数值**，映射表写死在代码里并出面文档（`key=1.0 / important=0.8 / normal=0.5 / low=0.25`），模型只选枚举，不填数字 |
 | C4 | 半衰期衰减 | `dsh-local-memory`：work 365d / preference 730d / emotion 60d / unknown 365d，用半衰期而非 `exp(-λt)` | 老记忆自动降权，且好解释 | **改造** | 采用"半衰期 + 好解释"。但 F1 的四种语义角色衰减速度不同：state 衰减最快（状态会变）、profile 最慢。V1 定为**按 type 的常数半衰期**（不进 schema，写在代码常量 + 文档），类型化半衰期留 V2（任务书 V2 范围明确列了"类型化半衰期"） |
-| C5 | `usageBoost = 1 + 0.15·ln(1+accessCount)` | `dsh-local-memory` | 用得多的记忆更该出现 | **不采用（V1）** | 它会形成正反馈：越常注入越常被检索，冷门但正确的记忆永远起不来。V1 先只记 `injected_count` / `used_count` 两个观测字段（**只记不参与打分**），等 P11 有真实数据再决定是否入公式。这也让"为什么这条没被注入"可解释 |
+| C5 | `usageBoost = 1 + 0.15·ln(1+accessCount)` | `dsh-local-memory` | 用得多的记忆更该出现 | **不采用（V1）** | 它会形成正反馈：越常注入越常被检索，冷门但正确的记忆永远起不来。V1 先只记 `injected_count` / `used_count` 两个观测字段（**只记不参与打分**），等 调优有真实数据再决定是否入公式。这也让"为什么这条没被注入"可解释 |
 | C6 | 中文 bigram + FTS5 | `dsh-local-memory`：入库切二元组存 FTS 列，`unicode61` 对中文 0 命中、`trigram` 对两字词 0 命中，实测只有自建 bigram 通 | 中文没有空格，SQLite 自带分词器对中文几乎不可用 | **推迟 V2** | 任务书明确把"中文 Bigram/FTS5"划进 V2。V1 用**关键词字段 + 子串匹配**（`LIKE '%kw%'` 走 `keywords`/`content`），足够覆盖"用户问数学题时命中'数学'"这类结构化场景；V1 的检索质量目标是"不污染"，不是"高召回" |
 | C7 | 覆盖率阈值把关（OR 取候选 + 50%/30–40% 覆盖率） | `dsh-local-memory`：短查询 50%、长句 30–40% | 纯 OR 召回噪声太大 | **推迟 V2** | 依赖 C6 的 token 化。V1 用结构化过滤（type/domain/scope/status）先砍候选，再子串匹配，噪声已被结构挡住 |
-| C8 | 单 JSON 后备后端 | `dsh-local-memory`：Node 20 无 `node:sqlite` 时退回 JSON + 纯 JS 打分 | 兼容没有 sqlite 的运行时 | **不采用** | 本机是 Electron 44 / Node 24，`node:sqlite` 与 FTS5 实测可用；P7 的 Engine 是 Python 标准库 `sqlite3`，天然有。双后端 = 两套语义要永远对齐，V1 不背这个包袱 |
-| C9 | `rid`(整型) + `id`(TEXT) 双主键 | `dsh-local-memory`：rid 给 FTS rowid 用，id 给历史引用不断链 | 软删/重建后外键引用不能断 | **采用（P7 若上 FTS）** | V1 的 P2 主键用 TEXT id；若 P7 后续接 FTS5，再补 `rid` 列。V1 先不加，避免过度设计 |
-| C10 | 软删 `deleted_at` + 显式 `purge()` | 两实现 | 删错了能恢复；真删要显式 | **采用** | 对应 P6 的 `archived` / `deleted` 两态。`forget()` 默认软删（P9），`purge` 只给管理界面且二次确认 |
-| C11 | `memory_update` 时间轴表 | `dsh-local-memory` | 可解释性：为什么变、何时变 | **采用** | 对应 P6 可解释性与 P9 "查看历史版本"。V1 落 `memory_change` 辅助表（旧值/新值/原因/触发来源/时间），主表只存当前态 |
+| C8 | 单 JSON 后备后端 | `dsh-local-memory`：Node 20 无 `node:sqlite` 时退回 JSON + 纯 JS 打分 | 兼容没有 sqlite 的运行时 | **不采用** | 本机是 Electron 44 / Node 24，`node:sqlite` 与 FTS5 实测可用；引擎层的 Engine 是 Python 标准库 `sqlite3`，天然有。双后端 = 两套语义要永远对齐，V1 不背这个包袱 |
+| C9 | `rid`(整型) + `id`(TEXT) 双主键 | `dsh-local-memory`：rid 给 FTS rowid 用，id 给历史引用不断链 | 软删/重建后外键引用不能断 | **采用（引擎实现若上 FTS）** | V1 的 数据模型主键用 TEXT id；若 引擎实现后续接 FTS5，再补 `rid` 列。V1 先不加，避免过度设计 |
+| C10 | 软删 `deleted_at` + 显式 `purge()` | 两实现 | 删错了能恢复；真删要显式 | **采用** | 对应 生命周期的 `archived` / `deleted` 两态。`forget()` 默认软删（见 §9），`purge` 只给管理界面且二次确认 |
+| C11 | `memory_update` 时间轴表 | `dsh-local-memory` | 可解释性：为什么变、何时变 | **采用** | 对应 生命周期可解释性与 管理 "查看历史版本"。V1 落 `memory_change` 辅助表（旧值/新值/原因/触发来源/时间），主表只存当前态 |
 | C12 | `memory_meta` 键值表 | `dsh-local-memory` | 记 schema_version、最后维护时间等 | **采用** | 但只放**运行元数据**，不放用户记忆。约束 A 的判定："删掉它，User Model 行为不变" → 成立 |
 
 ### D. 治理与运维
 
 | # | 机制 | 原实现 | 解决什么问题 | V1 是否采用 | 为什么 / 改造成什么 |
 | --- | --- | --- | --- | --- | --- |
-| D1 | 冲突检测（只给候选，绝不自动改） | `dsh-local-memory` `insight.js:findConflicts`：同一件事（token 余弦 ≥0.20）+ 互斥词对（需要/不需要…）+ 关键值不同（版本号/路径/端口/数字+单位）→ 打分排序 → 只读面板 | 矛盾必须人来裁决，误判代价太大 | **改造** | 思想全盘采用（尤其"只给候选 + 每条带 reasons"）。V1 不做全局两两扫描：只在**同 type + 同 subject + 同 domain_key** 的槽位内检测显式冲突（新陈述与在库值不等），并把结果变成 P3 的 `SUPERSEDE` 决策依据。全局粗筛推迟 V2（任务书 V2 列了"冲突发现"） |
+| D1 | 冲突检测（只给候选，绝不自动改） | `dsh-local-memory` `insight.js:findConflicts`：同一件事（token 余弦 ≥0.20）+ 互斥词对（需要/不需要…）+ 关键值不同（版本号/路径/端口/数字+单位）→ 打分排序 → 只读面板 | 矛盾必须人来裁决，误判代价太大 | **改造** | 思想全盘采用（尤其"只给候选 + 每条带 reasons"）。V1 不做全局两两扫描：只在**同 type + 同 subject + 同 domain_key** 的槽位内检测显式冲突（新陈述与在库值不等），并把结果变成 写入管线的 `SUPERSEDE` 决策依据。全局粗筛推迟 V2（任务书 V2 列了"冲突发现"） |
 | D2 | 记忆关系图 | `dsh-local-memory`：共现/共享标签 idf/同项目/时间相邻四类确定性关系 + 三道防毛线球（>30% 出现的标签不画、>12 成员分组不连、边数截断） | 让人看见"记忆之间怎么连的" | **推迟 V3** | 任务书 V3 才要 Memory Graph。V1/V2 连一条边都不存 |
-| D3 | 独立可视化界面 | `dsh-local-memory` `app/`（双击可跑的本地服务 + 力导向图） | 脱离 DSH 也能看记忆 | **推迟 V3** | P9 只要求 DSH 内的管理功能（list/get/update/forget/explain）。独立界面属于 V3 可视化 |
+| D3 | 独立可视化界面 | `dsh-local-memory` `app/`（双击可跑的本地服务 + 力导向图） | 脱离 DSH 也能看记忆 | **推迟 V3** | 管理只要求 DSH 内的管理功能（list/get/update/forget/explain）。独立界面属于 V3 可视化 |
 | D4 | Dream 异步整理 | `meow-memory`：空闲 ≥180 分钟 + 避开峰时，分三轮整理，租约防并发 | 记忆会脏，需要定期沉淀 | **推迟 V2** | 任务书 V2 明确列了"异步 Consolidation"。V1 只做惰性维护（D5） |
 | D5 | 惰性维护（不用 `setInterval`） | `dsh-local-memory`：每次用库时看 `last_maintenance_at`，超 7 天才干活；维护只做绝对安全的事 | 宿主随时退出/休眠，定时器不可靠；自动遗忘一旦误判不可逆 | **采用** | V1 维护只做：清孤儿变更行、记统计、`PRAGMA integrity_check`、清理过期 `on_demand`（不删，只 `archived`）。**绝不**自动删记忆/改 status |
-| D6 | 外部记忆库信任门 | `meow-memory`：工作区 `.dsh-meow` 非本机创建时默认暂停注入 | 别人的仓库里可能带恶意记忆/投毒 | **不采用（V1）** | V1 是单机单用户、库放在 `DSH_HOME` 而不是工作区（工作区文件会被 git 带出去）。信任门的前提是"记忆跟着仓库走"，V1 刻意不这么做。记入 `V2_V3_RESERVED.md` 待重新评估 |
-| D7 | HTTP 信任栅栏 | `dsh-local-memory`：每个请求先 `ctx.get('connection').requestRejection(req)` | 否则任何网页都能 fetch 本机接口读写记忆库 | **采用** | P9 的管理接口只要开在 `webServer` 上就必须有这一句。缺了它等于把用户画像暴露给任意网页 |
+| D6 | 外部记忆库信任门 | `meow-memory`：工作区 `.dsh-meow` 非本机创建时默认暂停注入 | 别人的仓库里可能带恶意记忆/投毒 | **不采用（V1）** | V1 是单机单用户、库放在 `DSH_HOME` 而不是工作区（工作区文件会被 git 带出去）。信任门的前提是"记忆跟着仓库走"，V1 刻意不这么做。记入 §13 待重新评估 |
+| D7 | HTTP 信任栅栏 | `dsh-local-memory`：每个请求先 `ctx.get('connection').requestRejection(req)` | 否则任何网页都能 fetch 本机接口读写记忆库 | **采用** | 管理的管理接口只要开在 `webServer` 上就必须有这一句。缺了它等于把用户画像暴露给任意网页 |
 
 ### E. 工程与接线
 
 | # | 机制 | 原实现 | 解决什么问题 | V1 是否采用 | 为什么 / 改造成什么 |
 | --- | --- | --- | --- | --- | --- |
-| E1 | core / host 分层（内核禁 import 宿主） | `dsh-local-memory` `docs\v2-design.md`：`src/core/` 不得 import DSH/cordis | 内核可脱离宿主测试、跑后台维护、换传输层 | **采用** | 直接对应 P7 的"Engine 独立工程、不与 harness 耦合"。V1 更进一步：Engine 是 Python 进程，宿主只通过子进程 JSON 协议调用，物理隔离 |
+| E1 | core / host 分层（内核禁 import 宿主） | `dsh-local-memory` `docs\v2-design.md`：`src/core/` 不得 import DSH/cordis | 内核可脱离宿主测试、跑后台维护、换传输层 | **采用** | 直接对应 引擎层的"Engine 独立工程、不与 harness 耦合"。V1 更进一步：Engine 是 Python 进程，宿主只通过子进程 JSON 协议调用，物理隔离 |
 | E2 | `inject` 声明服务 | `dsh-local-memory`：`export const inject = ['tools','systemPrompt','webServer']` | Cordis 只允许访问声明过的服务，漏了会"加载成功但功能全没有" | **采用** | 我的插件必须声明 `['tools','systemPrompt','sessions']`（+ `webServer` 若开管理接口） |
 | E3 | 禁用已弃用读 API | `dsh-session/README.md`：`ownEvents()` / `eventAt()` / `snapshotEvents()` 明确禁止新代码使用 | 兼容层会拖住演进 | **采用** | 只用 `ctx.on('session/event')` + `session.deriveMessages()`。`meow-memory` 用了 `ownEvents()`，不学 |
 | E4 | 注入消息必带 `source.kind` | `dsh-agent-loop:860`、`dsh-agent-instructions:1280` 都无保护读 `message.source.kind` | 缺 source 会 TypeError，整轮在第一个 step 前就死 | **采用** | 所有注入消息 `source.kind = 'dsh-attune-memory'`，并带 `memoryIds` 便于事后审计 |
-| E5 | 单文件客户端、无构建步骤 | `dsh-local-memory` `src\client\index.js`（740 行，`window.__ModuleLoader__.load`） | 免打包、免 HMR 复杂度 | **采用（P9）** | P9 的管理界面用同一形态，挂 `settings.section` |
+| E5 | 单文件客户端、无构建步骤 | `dsh-local-memory` `src\client\index.js`（740 行，`window.__ModuleLoader__.load`） | 免打包、免 HMR 复杂度 | **采用（见 §9）** | 管理的管理界面用同一形态，挂 `settings.section` |
 | E6 | 工具注册逐个 try/catch | 同上 | 单个工具重名不该拖垮整个插件 | **采用** | 顺带：工具失败必须返回结构化错误给模型，不能抛出去打死回合 |
 | E7 | 首次装配失败就明确报错 | `dsh-system-prompt`："a malformed prompt is worse than a loud failure" | 宁可炸也不要畸形 prompt | **采用** | 我的 section 文本若为空则返回 `''`（自动丢弃），但**模板错误**（比如变量名写错）必须抛 |
 
 ---
 
-### F. 由本表推出的 ADR（P8 前补齐编号）
+### F. 由本表推出的 ADR（宿主接入前补齐编号）
 
 | ADR | 主题 | 依据 |
 | --- | --- | --- |
@@ -5304,7 +5282,6 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 | ADR-008 | 去重集合必须随压缩信号重置 | §A6，`refs\nodal\src\host\recall.js` 缺陷 |
 | ADR-009 | importance 用枚举、映射成固定数值参与排序 | §C3 |
 | ADR-010 | V1 不引入 usageBoost / 全局冲突扫描 / 定时器 | §C5 / §D1 / §D5 |
-
 
 
 ## 13. 未知项与版本边界
@@ -5323,9 +5300,9 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 ### U-001 当前 route 的上下文窗口 `W` 与输出上限 `O`
 
 - **问题**：`deepseek-flash` 通过 `deepseek-account` provider 接入，其 `W`（context window）与 `O`（output cap）的实际数值未知。压缩阈值是 `floor(min(W × 0.8, W − O − 65536))`，没有这两个数就算不出"要造多长的对话才会触发压缩"。
-- **阻塞**：P8 的压缩后重注入验证（需要可控地跨过阈值）。
+- **阻塞**：宿主接入的压缩后重注入验证（需要可控地跨过阈值）。
 - **已知**：`compaction-basic` 在 base 里是**无 config 挂载**（`dsh-base/cordis.patch.yml:355-356` 只有 id + name），即全用默认值 `thresholdRatio 0.8` / `headroomTokens 65536` / `retainRatio 16%`。`token-meter` 与 `command-compact` 均已挂载。
-- **绕行**：P8 不靠算，靠 `/compact` 手动触发（`command-compact` 已挂载，`dsh-compaction-basic/README.md:92-96`），必要时再用长对话触发自动阈值做旁证。
+- **绕行**：接入验证不靠算，靠 `/compact` 手动触发（`command-compact` 已挂载，`dsh-compaction-basic/README.md:92-96`），必要时再用长对话触发自动阈值做旁证。
 - **确认方式**：运行时读 `ctx.tokenMeter` / adapter capacity，或从 `request/header` 的 envelope 取 `maxTokens`。
 - **状态**：`可绕行`
 
@@ -5334,7 +5311,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - **问题**：判断"这次压缩成功还是失败"需要 `data.error` 的准确形状（是 `{ message, code }`？还是字符串？失败时是否仍有 `data`？）。
 - **阻塞**：不阻塞（可先按"`data?.error` 为真即失败"处理，这与 `meow-memory` 的做法一致）。
 - **已知**：`meow-memory` 用 `const err = event.data?.error` 判断；`dsh-compaction` README 只说事件是 log-only、不上 surface。
-- **确认方式**：P8 冒烟测试里把 `compaction/*` 事件的 `JSON.stringify(event.data)` 打到日志。
+- **确认方式**：宿主接入冒烟测试里把 `compaction/*` 事件的 `JSON.stringify(event.data)` 打到日志。
 - **状态**：`可绕行`
 
 ### U-003 ACP（`billion-context`）折叠我的注入块后的实际表现
@@ -5350,31 +5327,31 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 ### U-004 模型是否会遵守常驻手册里的"收工自检"纪律
 
 - **问题**：写入主要靠模型主动调 `memory_save`。模型不照做，评估用例 A（不存垃圾）/ C（State 正确更新）就过不了。
-- **阻塞**：P10 评估。
+- **阻塞**：评估评估。
 - **已知**：`dsh-local-memory` 与 `meow-memory` 都把这个当主通道，且都把纪律写进常驻 section；前者还额外写了"别问用户要不要存，直接存"。
-- **确认方式**：P10 用真实对话跑用例 A/B/C，统计漏写率。
+- **确认方式**：评估用真实对话跑用例 A/B/C，统计漏写率。
 - **状态**：`待确认`
 
 ### U-005 `session/event` 在插件全局 ctx 上的可见范围与 `event.data` 形状
 
 - **问题**：`user/message` 的 `event.data.content` 是 block 数组还是字符串？`source.kind` 一定是 `'user'` 吗？子代理的会话会不会同样广播过来（需要过滤）？
-- **阻塞**：P8 的 `turn/end` 确定性抽取（要读用户原话）。
+- **阻塞**：宿主接入的 `turn/end` 确定性抽取（要读用户原话）。
 - **已知**：`dsh-session/lib/index.js:1596` 的 `callbackArgs = [this, event]`，即 `(session, event)`；`event.type` + `event.data`。`user/message` 的 `source.kind === 'user'` 表示真人（两份参考实现都这么判断）。
 - **绕行**：抽取时用 `session.header.origin === 'subagent'` 直接跳过子代理会话；`content` 用"block 数组取 text，兜底 `String(content)`"的双分支读取。
-- **确认方式**：P8 冒烟日志里打印一条 `user/message` 的完整 `data`。
+- **确认方式**：宿主接入冒烟日志里打印一条 `user/message` 的完整 `data`。
 - **状态**：`可绕行`
 
-### U-006 P9 管理界面的客户端 bundle 何时生效
+### U-006 管理管理界面的客户端 bundle 何时生效
 
 - **问题**：插件客户端代码（`window.__ModuleLoader__.load`）在 Web GUI 里是否需要重启/刷新才生效；本 profile 开着 HMR（`dsh-base` 里 `id: hmr`），但 HMR 只对 dev 模式下的特定包生效。
-- **阻塞**：P9 验收方式（改完要不要重启）。
-- **确认方式**：P9 实测：刷新页面 → 看 `settings.section` 是否出现；不行则重启 DSH。
+- **阻塞**：管理验收方式（改完要不要重启）。
+- **确认方式**：管理实测：刷新页面 → 看 `settings.section` 是否出现；不行则重启 DSH。
 - **状态**：`待确认`
 
 ### U-007 是否存在"另一个已在跑的记忆插件"造成双写
 
 - **问题**：如果用户的 profile 里已经装了 `dsh-local-memory` / `meow-memory` 之类，两个插件会同时注入、同时写库。
-- **阻塞**：不阻塞开发，但会导致 P10/P11 的观测被污染。
+- **阻塞**：不阻塞开发，但会导致 评估/调优的观测被污染。
 - **已知**：当前 `dsh.profile.bundles` 里**没有**任何 memory 插件（只有 dshmarket/dsh-pet/session-*/upload-file/billion-context/wallpaper-engine/dsh-context/better-sidebar），`dsh-base` 的模块 id 列表里也没有 memory 相关项。
 - **状态**：`已确认无冲突`
 
@@ -5400,7 +5377,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 | 版本 | 一句话 | 形态 |
 | --- | --- | --- |
 | 内部 1.0 | 单机、单用户、SQLite、词法检索 + 结构化过滤、三通道注入、可解释可纠正 | Python 引擎 + DSH 插件 |
-| 内部 1.1 | V1 + 真实使用中 10 个缺陷的修复（见 `DEFECT_LOG.md`） | 同上 |
+| 内部 1.1 | V1 + 真实使用中 10 个缺陷的修复（见 《内部版本的工作、修改与缺陷》§2） | 同上 |
 | **0.1.0（首个公开版本）** | 内部 1.0–1.2 全部内容：数值冲突按属性、主体双侧拦、自愈频控、维护扫描、抽取走预览、二元组召回 | Python 引擎 + DSH 插件 |
 | V2 | 检索质量与维护自动化：语义召回、中文分词升级、冲突发现、异步整理 | 同形态，增强引擎 |
 | V3 | 从"条目"到"关系"：记忆图、关系感知检索、可视化 | 可能需要独立界面 |
@@ -5506,7 +5483,7 @@ Embedding 召回（只做召回，不做替代过滤）。
 
 #### 2.3 可视化（记忆图 / 时间轴界面）
 
-- **为什么现在不做**：P9 已经有可用的管理页（列表 + 详情 + 时间轴 + 版本 diff）。
+- **为什么现在不做**：管理已经有可用的管理页（列表 + 详情 + 时间轴 + 版本 diff）。
   力导向图在几十条数据上不会提供比列表更多的信息，却要引入客户端 bundle 构建链。
 - **什么时候该做**：库 > 300 条，用户确实"看列表看不出结构"。
 
@@ -5522,12 +5499,12 @@ Embedding 召回（只做召回，不做替代过滤）。
 | 项 | 拒绝理由 |
 | --- | --- |
 | 保存完整聊天记录当记忆 | 哲学 ①：历史只是原料。存全量历史等于把检索问题变成"在一堆噪声里找信号"，且违反"记忆 ≠ 越多越好" |
-| 每轮把所有记忆注入 | 哲学 ②：注入成本随轮次线性增长，且污染上下文（P4 的四级 injection_policy 就是为反对这件事而设计的） |
+| 每轮把所有记忆注入 | 哲学 ②：注入成本随轮次线性增长，且污染上下文（读取管线的四级 injection_policy 就是为反对这件事而设计的） |
 | 自动人格推断（"你是一个内向的人"） | 红线：V1 禁止。推断不可证伪、不可纠正，写进画像后会自我强化 |
 | 不可逆的自动归并 | 红线：MERGE 必须显式发起；写管线只会"提议合并"（`merge_suggestion`），不会自己合并 |
 | 人工审核队列 | 它会让人放弃记录。V1 用"IGNORE / 降级 / 可撤销"三档替代 |
 | 按工作区拆库 | 违反约束 A（画像要么复制、要么残缺），且库放工作区会被 git 带走（ADR-009） |
-| 用 `session.ownEvents()` 这类已弃用 API | 官方 README 明写"new production calls are prohibited"（`UNKNOWN_LIST.md` C-005） |
+| 用 `session.ownEvents()` 这类已弃用 API | 官方 README 明写"new production calls are prohibited"（§13 C-005） |
 
 ---
 
@@ -5544,15 +5521,15 @@ Embedding 召回（只做召回，不做替代过滤）。
 
 ### 5. 与其它文档的关系
 
-- `MEMORY_SYSTEM_DESIGN_PRINCIPLES.md` §V1/V2/V3 表 —— 本文件是它的展开版。
-- `ADR.md` ADR-001~018 —— 每个"现在不做"的背面，都是一条已经做过的取舍。
-- `DEFECT_LOG.md` —— 哪些缺陷已经在 V1.1 修掉，剩下的才进这里。
+- §1 §V1/V2/V3 表 —— 本文件是它的展开版。
+- §11 ADR-001~018 —— 每个"现在不做"的背面，都是一条已经做过的取舍。
+- 《内部版本的工作、修改与缺陷》§2 —— 哪些缺陷已经在 V1.1 修掉，剩下的才进这里。
 
 ---
 
 ### 附：真实使用阶段要顺手做的一件事（O3）
 
-> 状态：0.1.0 已跑过 1 轮小样本（`.verify/ab-test.mjs`，结论见 `ENGINEERING_LOG.md` §12.1）：
+> 状态：0.1.0 已跑过 1 轮小样本（`.verify/ab-test.mjs`，结论见 《内部版本的工作、修改与缺陷》§1 §12.1）：
 > 带记忆侧回答里出现了只存在于库中的"12 月初试"，方向正确但样本不足。
 
 **A/B 效果证据**（三方审查第 11 项，不占 V2 版本号）：

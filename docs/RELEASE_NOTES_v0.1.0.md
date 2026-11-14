@@ -16,7 +16,7 @@
 | V2 | 语义召回（Embedding）、FTS5 重版、语义冲突发现、异步整理 | 只划界 |
 
 **范围声明**：0.1.0 仍然只有 SQLite + 词法/二元组检索 + 结构化过滤；
-没有 Embedding、没有记忆图、没有自动遗忘。这三条是 V2/V3 的事，理由见 `V2_V3_RESERVED.md`。
+没有 Embedding、没有记忆图、没有自动遗忘。这三条是 V2/V3 的事，理由见 DESIGN §13。
 
 ---
 
@@ -98,7 +98,7 @@ memory_observation 观测流水（read / discarded / maintenance / inject-*） �
 | W5 interaction 作用域收窄 | 修复 | 推断的 global interaction 降 `on_demand` |
 | W6 always 收紧 | 修复 | 仅 `profile/{identity,interaction,constraint}` 且 global |
 | W7 数值冲突 | 修复 | 按属性比，ADR-028 |
-| R1 同义改写召回 | **未做** | 需语义模型，V2 第一顺位（§0.1） |
+| R1 同义改写召回 | **未做** | 需语义模型，V2 第一顺位（DESIGN §13） |
 | R2 中文分词 | 修复（词法级） | 二元组兜底，ADR-033 |
 | R3 不假装语义 | 修复 | 检索说明与文档去掉"理解语义"的表述 |
 | R4 评分三阶段 | 修复 | `stage_*` + `debug.stages` |
@@ -108,7 +108,7 @@ memory_observation 观测流水（read / discarded / maintenance / inject-*） �
 | X4 inject_count | 修复 | `mark_injected()` 自增（只认插件回报的 id） |
 | O1 运行时可见 | 修复 | `memory_probe` + 管理页诊断 |
 | O2 ACP 盲区 | 修复 + 频控 | S2 进 system prompt；自愈指令 5 轮一次，ADR-030 |
-| O3 A/B 证据 | 小样本 | `.verify/ab-test.mjs`，仅方向性（§6.1） |
+| O3 A/B 证据 | 小样本 | `.verify/ab-test.mjs`，仅方向性（见 6.1） |
 | M1 维护扫描 | 修复 | `scan()`，ADR-031 |
 | M2 跨轮回顾 | 修复 | 5 句滚动缓冲 + 三句拼接重抽，ADR-032 |
 | M3 Formation/Assembly | 部分 | Assembly 完整；Formation 只到主题簇候选 |
