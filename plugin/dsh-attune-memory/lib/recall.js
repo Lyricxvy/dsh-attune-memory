@@ -163,7 +163,7 @@ export class Recall {
       stableIds: this.#stableIds,
       sessions,
       pendingReinject: [...this.#pendingReinject],
-      // 契约状态（T-013）：写不进去时先看这里 —— ok/mismatch/unavailable。
+      // 契约状态：写不进去时先看这里 —— ok/mismatch/unavailable。
       contract: this.#engine?.contract ?? null,
       lastError: this.#lastError ? String(this.#lastError.message ?? this.#lastError) : null,
     }

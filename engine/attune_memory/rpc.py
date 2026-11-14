@@ -20,14 +20,14 @@ from .store import InvariantError
 from .write import CandidateError
 
 #: 引擎的机器契约只有一处 —— 下面这张 OPS 表。以前 _SPEC / _required / _call / WRITE_OPS
-#: 分散在四个地方，于是出现了"dispatch 有 preview、白名单没有"这种漂移（T-002 第 1 条）。
+#: 分散在四个地方，于是出现了"dispatch 有 preview、白名单没有"这种漂移（审计第 1 条）。
 #: 现在 params/required/writes/handler 同处声明，其余全部派生。
 
 @dataclass(frozen=True)
 class OpSpec:
     """一个 op 的完整契约：允许什么参数、哪些必填、是否写操作、怎么执行。
 
-    四者必须同处声明 —— 这正是 T-002 暴露的那类漂移（``_call`` 有 preview、
+    四者必须同处声明 —— 这正是那次审计暴露的那类漂移（``_call`` 有 preview、
     ``_SPEC`` 没有）在结构上不可能再发生的原因：白名单与 dispatch 都从这张表派生。
     """
 

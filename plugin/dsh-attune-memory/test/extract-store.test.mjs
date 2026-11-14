@@ -1,8 +1,8 @@
 /**
- * T-006：兜底抽取通道端到端（插件 → 真引擎子进程）。
+ * 兜底抽取通道端到端（插件 → 真引擎子进程）。
  *
  * 要证的三件事：
- *   1. 含确定性句式的消息**真的落库**了（preview→add 链路打通，对照 T-002 第 2 条）；
+ *   1. 含确定性句式的消息**真的落库**了（preview→add 链路打通，对照审计第 2 条）；
  *   2. 一轮抽取留下 attempt/written/blocked/failed 四个计数（抽取不再静默）；
  *   3. 抽取出来的条目仍按 inferred 记（confidence ≤ 0.7，不会冒充用户明说）。
  *
@@ -15,7 +15,7 @@ import { join } from 'node:path'
 
 import { apply } from '../lib/index.js'
 import { EngineClient } from '../lib/engine.js'
-// 包名/模块名只从 shared 探测点来（T-016），本文件不再自己选包
+// 包名/模块名只从 shared 探测点来，本文件不再自己选包
 import { ENGINE_DIR, MODULE } from './lib/engine-pkg.mjs'
 // 临时库放系统临时目录：以前写在 engine/_probe/tmp，会把 .db/-wal/-shm 留在仓库里，
 // 发布树里就是"测试弄脏仓库"（check-layout 会抓到）。

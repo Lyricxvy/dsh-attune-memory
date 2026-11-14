@@ -18,7 +18,7 @@ import { createInterface } from 'node:readline'
  *
  * 这份常量只在两种时候有用：自检还没跑完，以及引擎明确报错退出（那说明子进程有异常）。
  * 自检通过后 `#writeOps` 会被引擎的名单整体替换 —— 以前两边各写一份，于是出现了
- * `tick` 只在 Python 侧算写操作的漂移（T-002 第 5 条）。
+ * `tick` 只在 Python 侧算写操作的漂移（审计第 5 条）。
  */
 const WRITE_OPS = new Set(['add', 'update', 'supersede', 'merge', 'forget', 'purge', 'restore', 'archive', 'delete', 'tick'])
 /** 可以安全重试的错误：请求可能根本没被处理，或者进程已经死了。 */
@@ -105,7 +105,7 @@ export class EngineClient {
   }
 
   /**
-   * 启动自检（T-004）：问引擎要 describe，比对写操作集合。
+   * 启动自检：问引擎要 describe，比对写操作集合。
    *
    * 为什么是"写操作"而不是"全部 op"：读操作多一个少一个最多是功能缺失，
    * 写操作判错却会让同一份数据被写两遍或写不进去 —— 这是必须 fail-closed 的那一半。

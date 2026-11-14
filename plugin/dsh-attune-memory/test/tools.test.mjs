@@ -1,5 +1,5 @@
 /**
- * 工具面的契约断言（T-005）：explicit 能被模型显式打开；hard 从模型工具里彻底消失。
+ * 工具面的契约断言：explicit 能被模型显式打开；hard 从模型工具里彻底消失。
  *
  * 跑法：node plugin/dsh-attune-memory/test/tools.test.mjs
  * （不要用 node --test：本沙箱里 test runner 起子进程会 EPERM）
@@ -63,7 +63,7 @@ assert.equal(engine.calls.at(-1)[0], 'forget')
 // 6. 物理删除在管理页/CLI 那条路上是 forget → purge 两步，模型工具里没有第三步
 assert.equal(finds(tools, 'memory_purge'), undefined, '模型侧没有 purge 工具')
 
-// 7. memory_probe 会把契约状态带出来（T-013：写不进去时先看这里）
+// 7. memory_probe 会把契约状态带出来（写不进去时先看这里）
 const probeEngine = {
   async call(op) {
     if (op === 'metrics') return { memories: { total: 0, by_status: {} }, counters: {}, observations: [] }

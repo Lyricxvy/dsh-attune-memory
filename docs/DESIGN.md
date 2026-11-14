@@ -5177,7 +5177,7 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 负面：每轮多调一次 `deriveMessages()`（增量缓存，实测可忽略）；历史还没写入时仍可能误报一次，属可接受噪声。
 - 影响：`plugin/dsh-attune-memory/lib/recall.js`、`test/recall.test.mjs`（新增"历史里还在 → inject_visible"断言）。
 
-### ADR-035 引擎机器契约只有一张 OPS 注册表，插件启动即自检（T-002 第 1/5 条）
+### ADR-035 引擎机器契约只有一张 OPS 注册表，插件启动即自检
 
 **Decision**：`rpc.py` 里 `OpSpec{params, required, writes, handler}` 的 `OPS` 字典是**唯一事实源**（27 个 op 同处声明），`_SPEC` / `WRITE_OPS` / `_check_args` / dispatch 全部由它派生；新增只读 `describe` op；插件 `engine.js` 首次调用前调 `describe` 比对写操作集合，不一致就把**写操作** fail-closed（报 `BAD_CONFIG`），读操作照常。
 
@@ -5190,11 +5190,11 @@ S1 手册补一句自愈指令（看不到记忆块先用 `memory_search` 确认
 - 负面：27 个 op 多一层 handler 间接；`writes` 语义刻意收窄成"要不要幂等语义"，`record` / `purge_observations` 会写遥测表但**不进** WRITE_OPS——这条必须留在注释里，否则下次有人会"顺手补进去"。
 - 影响：`engine/attune_memory/rpc.py`、`plugin/dsh-attune-memory/lib/engine.js`、`TestOpsRegistry` 7 例、`test/engine.test.mjs`（自检一致 + 不一致 fail-closed 两例）。
 
-### ADR-036 推断写入默认降级，不可逆删除离开模型工具箱（T-005）
+### ADR-036 推断写入默认降级，不可逆删除离开模型工具箱
 
 **Decision**：`Candidate.explicit` 默认 `False`；推断路径统一压 `confidence ≤ 0.7`、`always` 降 `contextual`、不自动取代旧事实。工具 schema 暴露 `explicit` 但**省略即默认**（不塞 `false`）。`hard` 从 `write.forget` / `OPS['forget']` / `tools.js` 三层删除，物理删除只剩 CLI（`memctl forget --hard` = `forget`→`purge`）与管理页两段式。
 
-**Alternatives**：保持 `explicit=True`；用 `confidence` 阈值代替 `explicit`；按 T-002 的建议在工具层把 `hard:true` 改写成 `forget`→`purge` 两步。
+**Alternatives**：保持 `explicit=True`；用 `confidence` 阈值代替 `explicit`；在工具层把 `hard:true` 改写成 `forget`→`purge` 两步。
 
 **Rejected because**：默认 True 等于"模型说的一切都算用户亲口说的"，一次误判就能把 0.7 的推断洗成 0.95、塞进 always 层，还能自动取代旧事实——不可逆、无痕迹。`confidence` 不能替代：模型对自己编出来的结论同样给 0.95，语气确定度不是真实性。把 `hard` 改名成两步只是换了名字，模型仍能触发不可逆删除且没有审计。
 

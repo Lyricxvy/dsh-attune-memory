@@ -13,7 +13,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EngineClient } from '../lib/engine.js'
-// 包目录名 / 模块名只从 test/lib/engine-pkg.mjs 派生（T-016：改名陷阱踩了三次）
+// 包目录名 / 模块名只从 test/lib/engine-pkg.mjs 派生（改名陷阱踩了三次）
 import { ENGINE_DIR, MODULE, copyEnginePkg, moduleFor } from './lib/engine-pkg.mjs'
 
 const PY = process.env.ATTUNE_TEST_PYTHON || 'python'
@@ -137,7 +137,7 @@ test('自检发现不一致时 fail-closed：写入报 BAD_CONFIG，读取仍可
 test('describe 不可用时写操作 fail-closed，读不受影响', async () => {
   // 复制引擎包，删掉 describe 那一行 —— 模拟"插件比引擎新"的版本不匹配。
   const root = mkdtempSync(join(tmpdir(), 'attune-nodescribe-'))
-  // 副本目录名跟随实际包名：发布树里是 attune_memory，写死 memory 会 ENOENT（T-015 真红过）
+  // 副本目录名跟随实际包名：发布树里是 attune_memory，写死 memory 会 ENOENT（真红过）
   const { name, dir } = copyEnginePkg(root)
   const rpcPath = join(dir, 'rpc.py')
   const source = readFileSync(rpcPath, 'utf8')

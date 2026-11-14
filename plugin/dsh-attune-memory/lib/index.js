@@ -190,7 +190,7 @@ export function apply(ctx, config = {}) {
    * 抽取写的记 'inferred'，只认前者。
    */
   async function extractAndStore(texts, sessionId, since, history = []) {
-    // 四计数（T-006）：抽取通道以前是"静默失败"的代名词 —— preview 挂了几个月，
+    // 四计数：抽取通道以前是"静默失败"的代名词 —— preview 挂了几个月，
     // 落库 0 条，界面上看不出任何异常。现在每次 turn/end 都把"试了几次/写成几条/
     // 被闸门拦下几条/失败几次"记进 memory_counter，诊断面板与 memory_probe 都能看见。
     const tally = { attempt: 0, written: 0, blocked: 0, failed: 0 }

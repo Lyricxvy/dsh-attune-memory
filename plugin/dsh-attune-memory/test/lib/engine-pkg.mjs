@@ -1,7 +1,7 @@
 /**
- * 引擎包位置的**唯一**探测点（T-016）。
+ * 引擎包位置的**唯一**探测点。
  *
- * 为什么要有这个文件：同一类坑踩了三次（T-009、T-011、T-013）——
+ * 为什么要有这个文件：同一类坑踩了三次（三次同类）——
  * 测试里直接写 `join(ENGINE_DIR, 'memory')` 或 `engineModule: 'attune_memory.rpc'`。
  * 源码树里包目录叫 `memory`，发布树经 `.publish/rename.py` 改名后叫 `attune_memory`；
  * 写死任何一边，另一边就是 ENOENT / ModuleNotFoundError。
@@ -41,7 +41,7 @@ export const PKG_DIR = join(ENGINE_DIR, PKG_NAME)
  *
  * 副本目录名默认跟随 `PKG_NAME`：改名后模块引用变成 `attune_memory.rpc`，
  * 若副本目录还叫 `memory`，spawn 出去的 `-m attune_memory.rpc` 就会 ModuleNotFoundError
- * （T-011 真红过这一处）。
+ * （真红过这一处）。
  *
  * @param {string} destRoot 目标父目录（通常是 mkdtemp 出来的临时目录）
  * @param {{ destName?: string }} [options]

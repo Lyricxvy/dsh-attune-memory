@@ -270,7 +270,7 @@ inject_turns 3 / inject_expected 3 / search_candidates 5 / search_hits 3
 
 ### 10. 下一步
 
-- **短期**：按 Pro 的三关验收——真实使用 1–2 周，盯两个信号：①长对话触发压缩后是否"失忆"（看 `inject_faded_*` 与 `memory_probe`）；②是否要反复提醒模型才用记忆（看 `memory_remember` 调用频次与丢弃日志）。
+- **短期**：按外部评审给出的三关验收——真实使用 1–2 周，盯两个信号：①长对话触发压缩后是否"失忆"（看 `inject_faded_*` 与 `memory_probe`）；②是否要反复提醒模型才用记忆（看 `memory_remember` 调用频次与丢弃日志）。
 - **中期（V2 边界内）**：中文 Bigram/FTS5 提升召回、类型化半衰期与自动遗忘、冲突发现可视化、异步 Consolidation。
 - **不做**：Embedding 唯一方案、自动人格推断、不可逆归并、按工作区拆库、存全量聊天记录。
 
@@ -513,7 +513,7 @@ eval 24/24；ADR **34 条**；发布树 68 项。
 
 ### 11. 装进真实桌面后，压缩换人做了（稳定层搬进 system prompt）
 
-**现场**：按 Pro 意见把插件装进 desktop profile 后，我核对这台机器到底谁在压缩，结论是"不是我原来假设的那个"。
+**现场**：按外部评审意见把插件装进 desktop profile 后，我核对这台机器到底谁在压缩，结论是"不是我原来假设的那个"。
 `profiles\desktop\node_modules\billion-context\dsh.bundle.patch.yml` 里有两行关键配置：
 
 ```yaml

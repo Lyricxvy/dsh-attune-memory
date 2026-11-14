@@ -649,7 +649,7 @@ class TestRpc(Base):
 
 
 class TestOpsRegistry(Base):
-    """T-004：OPS 是唯一事实源，_SPEC / WRITE_OPS / describe 都只是派生视图。"""
+    """OPS 是唯一事实源，_SPEC / WRITE_OPS / describe 都只是派生视图。"""
 
     def test_spec_and_write_ops_are_derived(self):
         self.assertEqual(rpc._SPEC, {op: spec.params for op, spec in rpc.OPS.items()})
@@ -666,7 +666,7 @@ class TestOpsRegistry(Base):
             self.assertEqual(got[op]["writes"], spec.writes, op)
 
     def test_preview_is_reachable_over_rpc(self):
-        """T-002 #1 的回归：preview 曾经因为 _SPEC 缺键而变成 error:"'preview'"。"""
+        """回归：preview 曾经因为 _SPEC 缺键而变成 error:"'preview'"。"""
         resp = rpc.handle(self.mem, {"id": 1, "op": "preview", "args": {
             "content": "用户名叫李四，正在备考考研数学一。",
             "type": "profile", "subtype": "identity",
@@ -756,7 +756,7 @@ class TestOpsRegistry(Base):
 
 
 class TestExplicitDefault(Base):
-    """T-005：explicit 默认 False —— 覆盖必须 deliberate opt-in（计划书 §5.2）。"""
+    """explicit 默认 False —— 覆盖必须 deliberate opt-in（计划书 §5.2）。"""
 
     def test_default_is_inferred(self):
         """不传 explicit 时按推断处理：conf 压到 0.7，always 降级成 contextual。"""
@@ -793,7 +793,7 @@ class TestExplicitDefault(Base):
         self.assertEqual(self.mem.get(old["memory"]["id"])["status"], "superseded")
 
     def test_supersede_keeps_confidence(self):
-        """显式取代 = 已经踩下油门：新条不该被推断降级压到 0.7（T-007 抓到）。"""
+        """显式取代 = 已经踩下油门：新条不该被推断降级压到 0.7（端到端测试抓到）。"""
         mid = self.mem.add("用户英语一目标 70 分", "state", "goal",
                            confidence=0.9, explicit=True)["memory"]["id"]
         out = self.mem.supersede(mid, "用户英语一目标 80 分", reason="用户改口")

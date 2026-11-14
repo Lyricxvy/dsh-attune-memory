@@ -1,5 +1,5 @@
 /**
- * T-007：端到端穿透测试（模型工具 → JS 客户端 → Python handle → 引擎）。
+ * 端到端穿透测试（模型工具 → JS 客户端 → Python handle → 引擎）。
  *
  * 三类断言：
  *   1. **契约矩阵**：`describe` 里的每个 op 都跑一次 happy path，再各跑两类非法输入
@@ -9,7 +9,7 @@
  *      删掉 `OPS["preview"]`，同一条
  *      happy-path 断言必须抛错。它证明"绿灯"不是因为断言没跑。
  *   3. **回归**：`explicit` 两条路径、`forget` 无 `hard`、`/api/reads` 与
- *      `/api/discarded` 走真实引擎（T-005 / T-003 修过的点）。
+ *      `/api/discarded` 走真实引擎（本轮修过的点）。
  *
  * 跑法：node plugin/dsh-attune-memory/test/e2e.test.mjs
  * （不要用 node --test：本沙箱里 test runner 起子进程会 EPERM）
@@ -24,7 +24,7 @@ import { ENGINE_DIR, MODULE, PKG_DIR as ENGINE_PKG_DIR, PKG_NAME as ENGINE_PKG_N
 import { registerRoutes } from '../lib/routes.js'
 import { buildTools } from '../lib/tools.js'
 
-// 包目录名/模块名只从 shared 探测点派生（T-016：同一类改名坑踩了三次）
+// 包目录名/模块名只从 shared 探测点派生（同一类改名坑踩了三次）
 const PKG_NAME = ENGINE_PKG_NAME
 const PKG_DIR = ENGINE_PKG_DIR
 const PY = process.env.ATTUNE_TEST_PYTHON || 'python'
@@ -72,7 +72,7 @@ test('契约矩阵：每个 op 的 happy path + 两类非法输入', async () =>
     const ops = await client.call('describe', {})
     const byName = new Map(ops.map((row) => [row.op, row]))
     assert.equal(ops.length, 27, `describe 应返回 27 个 op，实际 ${ops.length}`)
-    assert.ok(byName.has('preview'), 'describe 必须包含 preview（T-004 的回归点）')
+    assert.ok(byName.has('preview'), 'describe 必须包含 preview（回归点）')
 
     // ---- 种子数据 ----
     const seeded = await ok(client, 'add', {
@@ -85,7 +85,7 @@ test('契约矩阵：每个 op 的 happy path + 两类非法输入', async () =>
         content: '用户的英语一目标是 70 分。', type: 'state', subtype: 'goal',
         confidence: 0.9, explicit: true,
       })).memory.id,
-      content: '用户的英语一目标是 80 分。', reason: 'T-007',
+      content: '用户的英语一目标是 80 分。', reason: 'e2e',
     })
     assert.equal(Number(superseded.memory.confidence), 0.9,
       '显式取代出来的新条不该被推断降级压到 0.7')
@@ -100,17 +100,17 @@ test('契约矩阵：每个 op 的 happy path + 两类非法输入', async () =>
       describe: () => ok(client, 'describe', {}),
       add: () => ok(client, 'add', { content: '用户叫李四。', type: 'profile', subtype: 'identity' }),
       preview: () => ok(client, 'preview', { content: '用户叫李四。', type: 'profile', subtype: 'identity' }),
-      update: () => ok(client, 'update', { id: id1, fields: { content: '用户正在备考 2027 年考研数学一（数一）。' }, reason: 'T-007' }),
-      supersede: () => ok(client, 'supersede', { id: id1, content: '用户已放弃考研，准备直接工作。', reason: 'T-007' }),
-      merge: () => ok(client, 'merge', { ids: [id2, id2], content: '用户习惯先看思路再看步骤。', reason: 'T-007' }),
-      archive: () => ok(client, 'archive', { id: id2, reason: 'T-007' }),
-      delete: () => ok(client, 'delete', { id: id2, reason: 'T-007' }),
-      forget: () => ok(client, 'forget', { id: id2, reason: 'T-007' }),
-      restore: () => ok(client, 'restore', { id: id2, reason: 'T-007' }),
+      update: () => ok(client, 'update', { id: id1, fields: { content: '用户正在备考 2027 年考研数学一（数一）。' }, reason: 'e2e' }),
+      supersede: () => ok(client, 'supersede', { id: id1, content: '用户已放弃考研，准备直接工作。', reason: 'e2e' }),
+      merge: () => ok(client, 'merge', { ids: [id2, id2], content: '用户习惯先看思路再看步骤。', reason: 'e2e' }),
+      archive: () => ok(client, 'archive', { id: id2, reason: 'e2e' }),
+      delete: () => ok(client, 'delete', { id: id2, reason: 'e2e' }),
+      forget: () => ok(client, 'forget', { id: id2, reason: 'e2e' }),
+      restore: () => ok(client, 'restore', { id: id2, reason: 'e2e' }),
       purge: async () => {
         const row = await ok(client, 'add', { content: '待物理删除的测试条目。', type: 'episodic', subtype: 'event' })
-        await ok(client, 'forget', { id: row.memory.id, reason: 'T-007' })
-        return ok(client, 'purge', { id: row.memory.id, reason: 'T-007' })
+        await ok(client, 'forget', { id: row.memory.id, reason: 'e2e' })
+        return ok(client, 'purge', { id: row.memory.id, reason: 'e2e' })
       },
       get: () => ok(client, 'get', { id: id1 }),
       explain: () => ok(client, 'explain', { id: id1 }),
@@ -122,7 +122,7 @@ test('契约矩阵：每个 op 的 happy path + 两类非法输入', async () =>
       stats: () => ok(client, 'stats', {}),
       tick: () => ok(client, 'tick', {}),
       scan: () => ok(client, 'scan', { limit: 50 }),
-      record: () => ok(client, 'record', { counters: { e2e_hits: 1 }, observation: { kind: 'read', subject: 'e2e', detail: 'T-007' } }),
+      record: () => ok(client, 'record', { counters: { e2e_hits: 1 }, observation: { kind: 'read', subject: 'e2e', detail: 'e2e' } }),
       metrics: () => ok(client, 'metrics', { limit: 5 }),
       telemetry: () => ok(client, 'telemetry', { limit: 5 }),
       reads: () => ok(client, 'reads', { limit: 5 }),
@@ -162,7 +162,7 @@ test('反向验证：删掉 OPS["preview"] 后同一条断言必须抛错', asyn
   const dir = mkdtempSync(join(TMP, 'e2e-sabotage-'))
   // 临时副本的目录名与模块名都跟随 PKG_DIR.name：发布树里改名流水线会把模块引用
   // Python 包名改成 attune_memory，若这里硬写目录名或模块名，两侧就会对不上
-  // （T-010 真红过：cwd 下只有 memory/ 却 spawn `-m attune_memory.<模块>`）。
+  // （真红过：cwd 下只有 memory/ 却 spawn `-m attune_memory.<模块>`）。
   const pkgCopy = join(dir, PKG_NAME)
   cpSync(PKG_DIR, pkgCopy, { recursive: true })
   const rpcPath = join(pkgCopy, 'rpc.py')
@@ -206,7 +206,7 @@ test('反向验证：删掉 OPS["preview"] 后同一条断言必须抛错', asyn
   assert.ok(sawUnknown, '反向验证没有观察到「未知操作」——测试可能没打到点上')
 })
 
-// ---------------------------------------------------- 3. 回归 T-005：explicit 两条路径
+// ---------------------------------------------------- 3. 回归：explicit 两条路径
 test('回归：explicit 省略=推断（0.7/contextual），显式=true 保留高置信', async () => {
   const { db, cleanup } = tmpDb('explicit')
   const client = newClient(db)
@@ -230,26 +230,26 @@ test('回归：explicit 省略=推断（0.7/contextual），显式=true 保留�
   }
 })
 
-// ------------------------------------------- 4. 回归 T-005：forget 的 hard 已经不存在
+// ------------------------------------------- 4. 回归：forget 的 hard 已经不存在
 test('回归：forget 不接受 hard（模型侧物理删除通道已关闭）', async () => {
   const { db, cleanup } = tmpDb('forget')
   const client = newClient(db)
   try {
     const row = await client.call('add', { content: '用户叫王五。', type: 'profile', subtype: 'identity' })
     await assert.rejects(
-      () => client.call('forget', { id: row.memory.id, hard: true, reason: 'T-007' }),
+      () => client.call('forget', { id: row.memory.id, hard: true, reason: 'e2e' }),
       (error) => /不接受这些参数/.test(error.message),
       'forget 的 hard 必须已被删除',
     )
     // 软删仍然可用，且软删后能 restore
-    await client.call('forget', { id: row.memory.id, reason: 'T-007' })
-    const restored = await client.call('restore', { id: row.memory.id, reason: 'T-007' })
+    await client.call('forget', { id: row.memory.id, reason: 'e2e' })
+    const restored = await client.call('restore', { id: row.memory.id, reason: 'e2e' })
     assert.equal(restored.status, 'active')
 
     // 物理删除只能走 purge，且必须先 deleted
     const row2 = await client.call('add', { content: '用户叫赵六。', type: 'profile', subtype: 'identity' })
     await assert.rejects(
-      () => client.call('purge', { id: row2.memory.id, reason: 'T-007' }),
+      () => client.call('purge', { id: row2.memory.id, reason: 'e2e' }),
       (error) => /必须先 forget/.test(error.message),
       'purge 必须先软删',
     )
@@ -259,7 +259,7 @@ test('回归：forget 不接受 hard（模型侧物理删除通道已关闭）',
   }
 })
 
-// ------------------------------------- 5. 回归 T-003：两条诊断 API 走真实引擎返回 200
+// ------------------------------------- 5. 回归：两条诊断 API 走真实引擎返回 200
 test('回归：/api/reads 与 /api/discarded 返回 200 且有数据', async () => {
   const { db, cleanup } = tmpDb('routes')
   const client = newClient(db)

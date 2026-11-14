@@ -1,8 +1,8 @@
 /**
- * 防复发闸（T-016）：测试里不许再裸写引擎包目录名。
+ * 防复发闸：测试里不许再裸写引擎包目录名。
  *
  * 背景：`engine/memory` → 发布树 `engine/attune_memory`（`.publish/rename.py`）。
- * T-009 / T-011 / T-013 三次都是同一种写法——测试自己写 `join(ENGINE_DIR, 'memory')`
+ * 三次都是同一种写法——测试自己写 `join(ENGINE_DIR, 'memory')`
  * 或 `engineModule: 'attune_memory.rpc'`，源码树绿、发布树 ENOENT / ModuleNotFoundError。
  *
  * 现在包名/模块名只有一个来源：`test/lib/engine-pkg.mjs`。本文件扫描 test/ 下其余
