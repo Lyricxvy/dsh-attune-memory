@@ -7,4 +7,4 @@
 - 新版本发布时：新建 `docs/releases/vX.Y.Z/RELEASE_NOTES.md`，并同步 `README.md` 文档表、`plugin/dsh-attune-memory/package.json` 的 `version`、`engine/attune_memory/__init__.py` 的 `__version__`。
 - 旧版本的目录保留，不覆盖、不删除——它们是"某一版当时承诺了什么"的记录。
 
-当前版本：`v0.2.0`（架构收口：契约单一事实源、安全不变量、断链修复）。上一版 `v0.1.0` 是首个公开版本。
+当前版本：`v0.3.0`（可靠性、规模与时态：写入准入、时态治理、冲突判据、可观测性）。上一版 `v0.2.0` 是架构收口，`v0.1.0` 是首个公开版本。
