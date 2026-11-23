@@ -218,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     p_disc.add_argument("--limit", type=int, default=10)
     p_disc.add_argument("--purge", action="store_true", help="清空丢弃日志")
 
+    sub.add_parser("migrate", help="W-3.5：补时态四列并回填（幂等，可反复跑）")
     sub.add_parser("stats", help="库概况")
     sub.add_parser("tick", help="跑一次惰性维护（只归档过期 state 与老 superseded）")
     scan = sub.add_parser("scan", help="维护扫描：列出重复/冲突/可归纳/已过期/同槽多位（只读）")
@@ -327,6 +328,20 @@ def main(argv: list[str] | None = None) -> int:
                 for row in rows:
                     print(f"{row['at']}  「{row.get('content') or ''}」")
                     print(f"  理由：{row.get('reason') or '-'}")
+            return 0
+
+        if args.cmd == "migrate":
+            from .db import migrate_data
+
+            result = migrate_data(mem.store.conn)
+            mem.store.ensure_gram_df()
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(
+                    "迁移完成：补列 {added_columns} 个，回填 temporal_kind {filled_temporal_kind} 行，"
+                    "回填 invalidation {filled_invalidation} 行（重跑无副作用）".format(**result)
+                )
             return 0
 
         if args.cmd == "stats":

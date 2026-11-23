@@ -141,9 +141,12 @@ test('describe 不可用时写操作 fail-closed，读不受影响', async () =>
   const { name, dir } = copyEnginePkg(root)
   const rpcPath = join(dir, 'rpc.py')
   const source = readFileSync(rpcPath, 'utf8')
-  const line = '    "describe": OpSpec((), (), False, _op_describe),\n'
-  if (!source.includes(line)) throw new Error('在 rpc.py 里找不到 describe 的注册行，反向测试失效')
-  writeFileSync(rpcPath, source.replace(line, ''), 'utf8')
+  // 按整行正则匹配注册行：OpSpec 的字段会随版本变化（v0.3.0 加了 layer），
+  // 写死整行会让"反向测试"因为格式变了而失效——那比测试失败更糟（会静默不测）。
+  const linePattern = /^ *"describe": OpSpec\(.*\),\r?\n/m
+  const matched = source.match(linePattern)
+  if (!matched) throw new Error('在 rpc.py 里找不到 describe 的注册行，反向测试失效')
+  writeFileSync(rpcPath, source.replace(matched[0], ''), 'utf8')
 
   // 副本在 root 下，所以 engineDir 指 root；engineModule 必须跟着副本目录名走
   const client = newClient(join(root, 'memory.db'), { engineDir: root, engineModule: moduleFor(name) })

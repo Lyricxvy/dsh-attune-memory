@@ -12,16 +12,55 @@
 const MAX_PER_MESSAGE = 3
 const MAX_CONTENT = 160
 
+/**
+ * 意图准入（W-1.1）：与 engine/attune_memory/const.py 的词表逐项对齐。
+ *
+ * 为什么抽取侧也要拦一遍：引擎那层是"最后一道闸"，但抽取是**正则猜的**——它最容易
+ * 把"本窗口在忙"猜成偏好、把"不考数学二"猜成考数学二。在这里先拦掉，既省一次 RPC，
+ * 也让两侧口径一致（同一句话，模型显式写和兜底抽取应该得到同一个结论）。
+ */
+const RUNTIME_MARKERS = ['本窗口', '这个窗口', '当前窗口', '本会话', '当前会话', '这轮', '本轮', '本任务', '当前任务', '这个对话', '本次对话']
+const FILE_VERIFIABLE = ['信箱', 'MAILBOX', 'STATUS.md', 'README', 'package.json', 'cordis.patch.yml', 'git log', 'commit', '分支', '仓库', '工作区', '目录结构', '配置文件', '源码', '代码文件', '接口文档', 'schema']
+const ONE_OFF = ['明天', '后天', '今晚', '今早', '下周', '下个月', '待会儿', '一会儿']
+const NEGATION_VERBS = ['考', '启用', '开启', '保留', '加上', '必须', '使用']
+const CORRECTION_MARKERS = ['改考', '改成', '改为', '转考', '转向', '换成', '换到', '而是', '已经', '现在', '准备', '决定', '打算', '选择了', '选了']
+
+/** 返回"不该抽"的理由；null 表示可以抽。 */
+export function extractionBlocked(text) {
+  const raw = String(text ?? '')
+  for (const marker of RUNTIME_MARKERS) {
+    if (raw.includes(marker)) return `运行时状态（命中「${marker}」）`
+  }
+  const low = raw.toLowerCase()
+  for (const marker of FILE_VERIFIABLE) {
+    if (low.includes(marker.toLowerCase())) return `可从文件/仓库直接查到（命中「${marker}」）`
+  }
+  for (const marker of ONE_OFF) {
+    if (raw.includes(marker)) return `一次性安排（命中「${marker}」）`
+  }
+  if (!CORRECTION_MARKERS.some((m) => raw.includes(m))) {
+    for (const verb of NEGATION_VERBS) {
+      for (const neg of [`不${verb}`, `取消${verb}`, `没有${verb}`]) {
+        if (raw.includes(neg)) return `否定句式（「${neg}」）不记反向事实`
+      }
+    }
+  }
+  return null
+}
+
 /** 每条规则：句式 → 落库字段。subject 默认 user，`person/` 开头的用捕获组当主体名。 */
 const RULES = [
   {
     name: 'identity',
-    pattern: /(?:^|[，。,.！!\s])我(?:叫|是)([\u4e00-\u9fa5A-Za-z0-9]{1,12})(?=$|[，。,.！!？?\s])/,
+    pattern: /(?:^|[，。,.！!\s])我(?:叫|是)(?!(?:一|个|名|位|那种|这种))([\u4e00-\u9fa5A-Za-z0-9]{1,12})(?=$|[，。,.！!？?\s])/,
     build: (m) => ({ content: `用户自称「${m[1]}」`, type: 'profile', subtype: 'identity', importance: 'key' }),
   },
   {
     name: 'preference',
-    pattern: /我(?:很|比较|更|特别|不太|不)?(喜欢|偏好|习惯|讨厌|不喜欢|受不了)([^，。,.！!？?\n]{2,30})/,
+    // 否定必须进捕获组：旧写法把「不」交给可选前缀吃掉，于是"我不喜欢先给结论"
+    // 被记成"用户喜欢先给结论"——语义整个反过来（#33）。这里把"不喜欢/不太喜欢"
+    // 当成一个整体动词，宁可多写几个分支，也不让符号翻转。
+    pattern: /我(?:很|比较|更|特别)?(不太喜欢|不喜欢|喜欢|偏好|习惯|讨厌|受不了)([^，。,.！!？?\n]{2,30})/,
     build: (m) => ({
       content: `用户${m[1]}${m[2]}`.slice(0, MAX_CONTENT),
       type: 'profile',
@@ -108,6 +147,8 @@ const RULES = [
 export function extractCandidates(text, ctx = {}) {
   if (typeof text !== 'string' || text.length < 6) return []
   if (text.length > 2000) return [] // 长文一般是粘贴的代码/资料，不是自述
+  // W-1.1：整条消息先过意图准入门。宁可这一轮不漏抽，也别把工位/否定句写进库里。
+  if (extractionBlocked(text)) return []
   const out = []
   const seen = new Set()
   for (const rule of RULES) {

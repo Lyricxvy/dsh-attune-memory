@@ -105,14 +105,17 @@ assert(Number(c2.extract_blocked) >= 1, `blocked 应 ≥1，实际 ${c2.extract_
 assert(Number(c2.extract_failed) === 0, `不该有失败，实际 ${c2.extract_failed}`)
 
 // ---- 第三轮：模型这轮自己写过（actor=user），抽取应跳过并记账 -----------------
+emit('turn/start', {})
+emit('user/message', human('u-3', '我叫王五，记住了吗？'))
+// 模型自己写记忆发生在**这一轮之内**（turn/start 之后）——v0.3.0 起引擎时间戳
+// 精确到毫秒，写在 turn 之前就不会落进本轮的 recent 窗口（这是对的，别把
+// 上一轮写过的记忆算成"这轮已经写过"）。
 const seeded = await engine.call('add', {
   content: '用户希望回答先给结论再给细节。',
   type: 'profile',
   subtype: 'interaction',
   explicit: true,
 })
-emit('turn/start', {})
-emit('user/message', human('u-3', '我叫王五，记住了吗？'))
 emit('turn/end', {})
 await settle()
 

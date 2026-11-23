@@ -88,6 +88,24 @@ get/explain/list/search/find_similar/read_for_context/stats/tick`。
 | 本地 HTTP | 要多守一个端口、加一层鉴权（否则任何网页都能读写记忆库）；每次请求还有 TCP 开销 |
 | stdio 子进程 | 一次 spawn 常驻、天然背压、天然隔离；引擎崩了插件 fail-open，DSH 不受牵连 |
 
+## v0.3.0 新增的命令
+
+| 命令 | 作用 |
+|---|---|
+| `python -m eval.gates` | 四道闸一次跑（契约 / 场景 / 判分器 / 规模），CI 用它；`--fast` 供本地开发 |
+| `python -m eval.bench_write_scale` | 写入规模基准：per-write 增长倍率 + 最大样本耗时 + 逐段 doubling 参考值 |
+| `python -m attune_memory.memctl migrate --db <path>` | 老库补时态四列并回填（幂等，可反复跑） |
+| `python -m eval.external.run ...` | 外部基线（LongMemEval / LoCoMo），产物一律标 UNVERIFIED |
+
+时态四字段：`temporal_kind`（current/historical/event/uncertain）、`invalidation`（NULL/corrected/superseded）、
+`event_date`（仅 event）、`last_verified`。`search(..., asof=...)` 能查"某一天成立的事实"。
+
+检索的候选集也换了来源：`search()` 现在先按查询词查 `memory_gram` 倒排
+（`store.candidates_by_terms`，按共现 gram 数排序，df > 200 的公共 gram 不进 `IN`），
+再补 50 条"最近写入"兜底领域约定。旧实现取 `ORDER BY updated_at DESC LIMIT 200`——
+库里三万条时这 200 条全是最近写的，相关记忆根本进不了候选（本地复现：501 条时
+`What degree did I graduate with?` 命中 0 条；回归用例 `R-2.3.5`）。
+
 ## 几个刻意的取舍
 
 | 取舍 | 理由 |

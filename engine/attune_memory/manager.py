@@ -261,9 +261,48 @@ class Memory:
             return self._mark_injected_in_tx(ids or [])
 
     def metrics(self, *, limit: int = 20) -> dict:
+        """W-5.2：聚合指标带信封（schema/version/started_at/coverage）。
+
+        六态分账（W-5.1）在这份输出里能直接读出漏斗：
+        candidate → generated → rendered → delivered → visible → used。
+        其中 used 是**外部回报**的（插件在下一轮看到注入块仍在视野里才算 visible，
+        used 目前只能靠人工/工具显式标注），引擎不猜。
+        """
+        from . import __version__  # 延迟导入：manager 在 __init__ 之前就被加载
+
         stats = self.stats()
+        counters = self.store.counters()
+        total = int(stats.get("total") or 0)
+        started_at = self.store.meta_get("started_at")
+        if not started_at:
+            started_at = now_iso()
+            self.store.meta_set("started_at", started_at)
+        coverage = {
+            # 有多少条记忆至少被注入过一次（分母是总数，0 条时为 1.0 而不是 NaN）
+            "injected_ratio": round(
+                sum(1 for m in self.store.query(status="active", limit=100000) if (m.get("inject_count") or 0) > 0)
+                / total, 4,
+            ) if total else 0.0,
+            "trace_ratio": round(
+                sum(1 for m in self.store.query(status="active", limit=100000) if m.get("source_message_id"))
+                / total, 4,
+            ) if total else 0.0,
+        }
+        funnel = {
+            "candidate": int(counters.get("candidates_total") or 0),
+            "generated": int(counters.get("op_add") or 0) + int(counters.get("op_touch") or 0),
+            "rendered": int(counters.get("inject_items") or 0),
+            "delivered": int(counters.get("inject_expected") or 0),
+            "visible": int(counters.get("inject_visible") or 0),
+            "used": int(counters.get("used") or 0),
+        }
         return {
-            "counters": self.store.counters(),
+            "schema": "attune-memory.metrics/v1",
+            "version": __version__,
+            "started_at": started_at,
+            "coverage": coverage,
+            "funnel": funnel,
+            "counters": counters,
             "observations": self.store.observations(limit=limit),
             "memories": stats,
         }

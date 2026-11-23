@@ -4130,7 +4130,7 @@ A–E 五个场景证明"系统在真实输入下不添乱"。
 
 
 > 单元测试证明"函数按写法工作"；评估套件证明"系统在真实输入下不给用户添乱"。
-> 所以这里每一格都从 `attune_memory.rpc` 的 stdio 入口进（跟插件在宿主里的用法完全一致）、
+> 所以这里每一格都从 `attune_attune_memory.rpc` 的 stdio 入口进（跟插件在宿主里的用法完全一致）、
 > 用全新临时库、按用户真会说的话喂进去，只断言**行为**，不断言实现。
 
 ```powershell
@@ -4516,7 +4516,7 @@ T 通道的记忆注入块被压缩遮蔽后，**不在压缩时抢救**，而�
 ### ADR-008：引擎作为常驻 Python 子进程，stdio JSON-RPC 通信
 
 **Decision**
-记忆引擎（引擎层的 `engine/`）以**独立 Python 进程**运行，插件通过 `spawn("python", ["-m","attune_memory.rpc", dbPath])` 启动一次并常驻；协议是一行 JSON 请求 / 一行 JSON 响应，UTF-8 编码。插件侧维护请求 id、超时与重启（进程死了下次调用重启），全部调用 fail-open。
+记忆引擎（引擎层的 `engine/`）以**独立 Python 进程**运行，插件通过 `spawn("python", ["-m","attune_attune_memory.rpc", dbPath])` 启动一次并常驻；协议是一行 JSON 请求 / 一行 JSON 响应，UTF-8 编码。插件侧维护请求 id、超时与重启（进程死了下次调用重启），全部调用 fail-open。
 
 **Alternatives**
 1. 把引擎逻辑用 JS 重写进插件（与 DSH 同进程）。
@@ -4533,7 +4533,7 @@ T 通道的记忆注入块被压缩遮蔽后，**不在压缩时抢救**，而�
 
 **Consequences**
 - 正面：引擎崩溃 = 子进程退出，插件 `catch` 后返回空记忆、对话继续（fail-open）。
-- 正面：引擎可被 `python -m unittest` 独立测试、可被 `python -m attune_memory.rpc` 手工驱动，管理的管理界面也能复用同一协议。
+- 正面：引擎可被 `python -m unittest` 独立测试、可被 `python -m attune_attune_memory.rpc` 手工驱动，管理的管理界面也能复用同一协议。
 - 负面：多一个进程要管（启动、超时、重启、退出时 kill）；`stdin` 写入需要串行化，避免两个请求的响应交错。
 - 负面：Windows 上必须显式把 stdin/stdout 设成 UTF-8（引擎实现实测：默认 cp936 会让中文请求变成孤立代理字符）。该修复已在 `rpc.py` 的 `main()` 里。
 - 影响：`engine/README.md` 的"当子进程用"一节；宿主侧插件里的 `EngineClient` 类。

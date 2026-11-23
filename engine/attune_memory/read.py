@@ -15,6 +15,7 @@ import json
 
 from . import const
 from .search import is_expired, search
+from .util import now_iso
 from .store import Store
 from .text import normalize
 
@@ -106,12 +107,21 @@ def _label(mem: dict) -> str:
 
 def stable_items(store: Store, *, user_id: str = "default", now: str | None = None) -> list[dict]:
     """C 通道候选：always 层里够稳、够短的那些。"""
+    now = now or now_iso()
     rows = store.query(user_id=user_id, status="active", policy="always", order="created_at")
     out = []
     for m in rows:
+        # W-1.3：task 作用域的记忆只在一个任务里成立，绝不能进每轮都注入的稳定块
+        # （它连 always 都申请不到，这里再显式挡一次，防历史数据/手工写入绕过）。
+        if m["scope"] == "task":
+            continue
         if float(m["confidence"]) < STABLE_MIN_CONFIDENCE:
             continue
         if len(normalize(m["content"])) > STABLE_MAX_CONTENT_CHARS:
+            continue
+        # W-3.4：过期事实绝不能进稳定块。它每一轮都会被重发，一旦过期就是
+        # 主动往模型嘴里塞旧结论——比"检索不到"危险得多（#48）。
+        if is_expired(m, now):
             continue
         out.append(m)
     out.sort(key=lambda m: (-const.IMPORTANCE_VALUE[m["importance"]], m["created_at"]))
@@ -123,6 +133,10 @@ def stable_block(
 ) -> dict:
     """C 通道文本。**绝不能含时间词**——文本一变，DSH 就会再追加一条快照。"""
     items = stable_items(store, user_id=user_id, now=now)
+    # 注意：这里不记计数。稳定块是**每个 step 都会重新组装**的热路径（DSH 每步调
+    # assemble → section.text()），一次 UPSERT 看似便宜，乘以每轮多个 step 就是把
+    # 读路径变成写路径。要统计注入量，看 read_for_context 的 inject_items /
+    # inject_expected（那是每轮一次，不是每步一次）。
     picked: list[dict] = []
     used = 0
     for m in items:

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-19",
+  "policy": [
+    "未登记的数据集不得进入正式评测。",
+    "sha256 是唯一准入凭证：文件对不上哈希就拒绝运行（fetch.py 强制）。",
+    "镜像地址与上游地址都记录；镜像只作为无法直连时的传输通道，不改变数据本身。",
+    "两个数据集都只用于检索模式（A-R），不得用来声称写入治理正确。"
+  ],
+  "datasets": {
+    "longmemeval_s": {
+      "dataset": "LongMemEval（Wu et al., ICLR 2025）",
+      "upstream": "https://huggingface.co/datasets/xiaowu0162/longmemeval",
+      "paper": "https://arxiv.org/abs/2410.10813",
+      "url": "https://hf-mirror.com/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s",
+      "sha256": "08d8dad4be43ee2049a22ff5674eb86725d0ce5ff434cde2627e5e8e7e117894",
+      "bytes": 278025796,
+      "license": "MIT",
+      "license_source": "HuggingFace 数据集标签 license:mit",
+      "content": "500 题 × 6 类（单会话用户/助手/偏好、多会话、知识更新、时间推理）；每题 500 个历史 session 的 haystack，标准答案 = answer_session_ids",
+      "tests": "长程检索：正确 session 能否在 top-k 里被捞出来",
+      "does_not_test": "写入治理（supersede/遗忘/scope）、注入预算、真实对话里的抽取质量",
+      "mode": "A-R",
+      "default_k": 50,
+      "note": "上游已标注 longmemeval 为 deprecated，替代品是 longmemeval-cleaned；本版固定使用 s 版并用哈希锁定，换版本必须走 registry 变更流程。"
+    },
+    "longmemeval_oracle": {
+      "dataset": "LongMemEval oracle（仅用于冒烟自检，不作为对外成绩）",
+      "upstream": "https://huggingface.co/datasets/xiaowu0162/longmemeval",
+      "url": "https://hf-mirror.com/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_oracle",
+      "sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+      "bytes": 15388478,
+      "license": "MIT",
+      "content": "500 题，每题只保留证据 session（3 个左右）",
+      "tests": "只验证链路通不通（候选只有 3 个，随机基线接近 1，不能当能力证据）",
+      "does_not_test": "检索能力——难度过低，禁止用于对外结论",
+      "mode": "A-R",
+      "default_k": 10
+    },
+    "locomo10": {
+      "dataset": "LoCoMo（Maharana et al., ACL 2024）",
+      "upstream": "https://github.com/snap-research/locomo",
+      "paper": "https://arxiv.org/abs/2402.17753",
+      "url": "https://hf-mirror.com/datasets/Percena/locomo-mc10/resolve/main/raw/locomo10.json",
+      "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+      "bytes": 2805274,
+      "license": "CC BY-NC 4.0（上游 data 许可；镜像仓 LICENSE 为 CC BY-NC-4.0）",
+      "license_source": "https://huggingface.co/datasets/adymaharana/locomo 标签 license:cc-by-nc-4.0",
+      "content": "10 段多年对话（每段 19–32 个 session，平均 ~300 轮），1986 个 QA，5 类：多跳/时间/开放域/单跳/对抗；标准答案 = evidence 里的 dia_id",
+      "tests": "证据轮次召回（turn 级），含时间与多跳",
+      "does_not_test": "答案生成正确性（本版不做 LLM judge）、写入治理",
+      "mode": "A-R",
+      "default_k": 50,
+      "note": "取自镜像仓 raw/locomo10.json；上游原文件在 GitHub，本环境不可直连。sha256 已与镜像声明哈希一致，但与 GitHub 原件的一致性未由本项目独立验证——审计时请把这一点算进去。"
+    }
+  }
+}

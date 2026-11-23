@@ -36,6 +36,25 @@ def normalize(text: str) -> str:
     return s.strip()
 
 
+def grams(text: str, n: int = 2) -> list[str]:
+    """字符 n-gram（默认二元组），给倒排索引做"近似子串"召回。
+
+    为什么索引要存 n-gram 而不是只存 keywords：旧的 ``near_keywords`` 是
+    ``term in (keywords + content)`` 的**子串**语义，只索引 keywords 会漏召回
+    （"极限题"不在 keywords 里、但出现在正文里）。存二元组能把候选集缩到
+    "所有 gram 都命中"的少数行，再回表做一次子串校验，结果与全表扫一致。
+    """
+    norm = re.sub(r"\s+", "", normalize(text))
+    if len(norm) < n:
+        return []
+    return [norm[i:i + n] for i in range(len(norm) - n + 1)]
+
+
+def has_gram_index_support(term: str) -> bool:
+    """单字词无法用二元组索引召回，交给调用方走兜底路径。"""
+    return len(normalize(term)) >= 2
+
+
 def split_keywords(keywords: str | list[str] | None) -> list[str]:
     """keywords 列是空格分隔的字符串；也接受 list。返回去重、去空的列表。"""
     if not keywords:

@@ -443,6 +443,10 @@ class TestSearch(Base):
         m = self.add("用户主要备考数学一", "profile", "identity", domain_key="study",
                      scope="domain", importance="important")["memory"]
         self.mem.search("数学一", domain="study.math")
+        # W-5.3（#24）：读路径默认不写库；要记"真被用上"必须显式声明
+        self.assertEqual(self.mem.get(m["id"])["use_count"], 0)
+        hits = self.mem.search("数学一", domain="study.math", count_use=True)
+        self.assertTrue(hits, "同一条查询在显式记账时应当命中")
         self.assertEqual(self.mem.get(m["id"])["use_count"], 1)
 
 

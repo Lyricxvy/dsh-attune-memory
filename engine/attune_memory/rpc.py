@@ -35,6 +35,10 @@ class OpSpec:
     required: tuple[str, ...]
     writes: bool
     handler: Callable[["Memory", dict[str, Any]], Any]
+    #: 目标层（v0.3.0 W-1.2）：evidence=证据层（本版无 op）、fact=事实层、assembly=组装层。
+    #: 写操作只能落 fact 层；检索/注入属 assembly。请求信封可带 ``layer`` 声明，
+    #: 与 op 的声明不一致就拒——"写入口不知道自己在写哪层"在协议层就不成立。
+    layer: str = "fact"
 
 
 def _rest(args: dict[str, Any], *taken: str) -> dict[str, Any]:
@@ -159,17 +163,19 @@ OPS: dict[str, OpSpec] = {
     "add": OpSpec(
         ("content", "type", "subtype", "subject_type", "subject_name", "domain_key",
          "scope", "importance", "injection_policy", "confidence", "keywords", "explicit",
-         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata"),
+         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata",
+         "temporal_kind", "invalidation", "event_date", "last_verified"),
         ("content", "type", "subtype"), True, _op_add),
     "preview": OpSpec(
         ("content", "type", "subtype", "subject_type", "subject_name", "domain_key",
          "scope", "importance", "injection_policy", "confidence", "keywords", "explicit",
-         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata"),
+         "source_message_id", "source_conversation_id", "valid_from", "valid_until", "metadata",
+         "temporal_kind", "invalidation", "event_date", "last_verified"),
         ("content", "type", "subtype"), False, _op_preview),
     "update": OpSpec(("id", "fields", "reason"), ("id", "fields"), True, _op_update),
     "supersede": OpSpec(
         ("id", "content", "reason", "confidence", "importance", "keywords",
-         "injection_policy", "valid_until", "metadata"),
+         "injection_policy", "valid_until", "metadata", "invalidation"),
         ("id", "content"), True, _op_supersede),
     "merge": OpSpec(("ids", "content", "reason", "importance", "keywords"),
                     ("ids", "content"), True, _op_merge),
@@ -179,29 +185,32 @@ OPS: dict[str, OpSpec] = {
     "restore": OpSpec(("id", "reason"), ("id",), True, _op_restore),
     "purge": OpSpec(("id", "reason"), ("id",), True, _op_purge),
     "get": OpSpec(("id",), ("id",), False, _op_get),
-    "explain": OpSpec(("id",), ("id",), False, _op_explain),
+    "explain": OpSpec(("id",), ("id",), False, _op_explain, "assembly"),
     "list": OpSpec(("status", "type", "subtype", "domain_key", "policy", "limit", "offset"),
-                   (), False, _op_list),
+                   (), False, _op_list, "assembly"),
     "search": OpSpec(("query", "domain", "type", "subtypes", "policies", "limit", "task_key",
                       "include_expired", "include_superseded", "include_never"),
-                     (), False, _op_search),
+                     (), False, _op_search, "assembly"),
     "find_similar": OpSpec(("content", "type", "subtype", "subject_type", "subject_name",
-                            "domain_key", "limit"), ("content",), False, _op_find_similar),
-    "read_for_context": OpSpec(("query", "domain", "task_key"), (), False, _op_read_for_context),
-    "recent": OpSpec(("since", "limit"), ("since",), False, _op_recent),
-    "stats": OpSpec((), (), False, _op_stats),
+                            "domain_key", "limit"), ("content",), False, _op_find_similar, "assembly"),
+    "read_for_context": OpSpec(("query", "domain", "task_key"), (), False, _op_read_for_context, "assembly"),
+    "recent": OpSpec(("since", "limit"), ("since",), False, _op_recent, "assembly"),
+    "stats": OpSpec((), (), False, _op_stats, "assembly"),
     "tick": OpSpec((), (), True, _op_tick),
-    "scan": OpSpec(("limit",), (), False, _op_scan),
+    "scan": OpSpec(("limit",), (), False, _op_scan, "assembly"),
     # record / purge_observations 会改库，但改的是遥测表，不是记忆本身。
     # 它们不进 WRITE_OPS：注入记账每轮都发生，给它套幂等回放只会让 memory_request 膨胀。
-    "record": OpSpec(("counters", "observation", "injected_ids"), (), False, _op_record),
-    "metrics": OpSpec(("limit",), (), False, _op_metrics),
-    "telemetry": OpSpec(("limit",), (), False, _op_telemetry),
-    "reads": OpSpec(("limit",), (), False, _op_reads),
-    "discarded": OpSpec(("limit",), (), False, _op_discarded),
-    "purge_observations": OpSpec(("kind",), (), False, _op_purge_observations),
-    "describe": OpSpec((), (), False, _op_describe),
+    "record": OpSpec(("counters", "observation", "injected_ids"), (), False, _op_record, "assembly"),
+    "metrics": OpSpec(("limit",), (), False, _op_metrics, "assembly"),
+    "telemetry": OpSpec(("limit",), (), False, _op_telemetry, "assembly"),
+    "reads": OpSpec(("limit",), (), False, _op_reads, "assembly"),
+    "discarded": OpSpec(("limit",), (), False, _op_discarded, "assembly"),
+    "purge_observations": OpSpec(("kind",), (), False, _op_purge_observations, "assembly"),
+    "describe": OpSpec((), (), False, _op_describe, "assembly"),
 }
+
+#: 三个职责层（W-1.2）。v0.3.0 只声明契约，不落地证据层存储（Raw-history RAG 在 v0.4.0）。
+LAYERS: tuple[str, ...] = ("evidence", "fact", "assembly")
 
 #: 派生视图：给测试与兼容旧代码用，不是第二份事实源。
 #: ``writes`` 的语义刻意收窄成"要不要幂等语义"，不是"会不会改库"——遥测写入不进这张名单。
@@ -212,7 +221,8 @@ WRITE_OPS: frozenset[str] = frozenset(op for op, spec in OPS.items() if spec.wri
 def describe_ops() -> list[dict[str, Any]]:
     """返回每个 op 的机器契约（JS 侧启动自检就比对这份）。"""
     return [
-        {"op": op, "params": list(spec.params), "required": list(spec.required), "writes": spec.writes}
+        {"op": op, "params": list(spec.params), "required": list(spec.required),
+         "writes": spec.writes, "layer": spec.layer}
         for op, spec in OPS.items()
     ]
 
@@ -249,6 +259,19 @@ def handle(mem: Memory, req: dict) -> dict:
     args = req.get("args") or {}
     if not isinstance(args, dict):
         return {"id": rid, "ok": False, "error": "args 必须是对象"}
+    # W-1.2：请求可以声明"这次写的是哪一层"。声明与 op 不一致直接拒——
+    # 旧客户端不传 layer 时按 op 的声明走（兼容），传了就必须一致。
+    declared_layer = req.get("layer")
+    if declared_layer is not None:
+        spec = OPS.get(str(op))
+        if spec is None:
+            return {"id": rid, "ok": False, "error": f"未知操作：{op}；可用：{sorted(OPS)}"}
+        if declared_layer not in LAYERS:
+            return {"id": rid, "ok": False,
+                    "error": f"非法 layer：{declared_layer}；合法值：{list(LAYERS)}"}
+        if declared_layer != spec.layer:
+            return {"id": rid, "ok": False,
+                    "error": f"layer 不匹配：{op} 属于 {spec.layer} 层，请求声明的是 {declared_layer}"}
 
     # 幂等（模块 2）：写类请求可能因为超时/进程重启被重发。带同一个 dedupe 键时，
     # 第二次起原样返回第一次的结果，而不是再写一遍。只缓存成功结果——失败允许重试。

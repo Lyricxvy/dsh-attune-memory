@@ -85,12 +85,16 @@ export function apply(ctx, config = {}) {
   })
 
   // ---------------------------------------------------------------- 写点
+  // W-1.3：task 作用域的默认任务键 = 当前会话。任务级状态（"这轮在打包"）写进来
+  // 只在本会话可见，不会漏成别人的全局事实。
+  let currentSessionId = null
   for (const tool of buildTools(engine, {
     onWrite: () => {
       void recall.refresh()
     },
     domainFor: (value) => guessDomain(String(value ?? '')),
     probe: () => recall.probe(),
+    taskKey: () => (currentSessionId ? `session:${currentSessionId}` : undefined),
   })) {
     try {
       ctx.tools.register(tool)
@@ -124,6 +128,7 @@ export function apply(ctx, config = {}) {
     try {
       if (disposed || !event || typeof event.type !== 'string') return
       const sessionId = String(session?.id ?? 'unknown')
+      currentSessionId = sessionId
 
       if (event.type === 'compaction/end') {
         // data.error 为真表示压缩失败，此时历史没被替换，不需要重注入。
@@ -153,7 +158,10 @@ export function apply(ctx, config = {}) {
       }
 
       if (event.type === 'turn/start') {
-        turnStart.set(sessionId, new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'))
+        // v0.3.0（W-2.4）：引擎时间戳精确到毫秒，这里也必须保留毫秒，
+        // 否则 "13:00:00Z" 在字符串比较里**小于** "13:00:00.456Z"，
+        // 本轮模型写的记忆会被判成"发生在 turn 之前"，skipped 永远记不上。
+        turnStart.set(sessionId, new Date().toISOString())
         return
       }
 

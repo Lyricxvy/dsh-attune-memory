@@ -8,20 +8,42 @@ from datetime import datetime, timezone
 _ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 
-def now_iso(now: datetime | None = None) -> str:
-    """统一的时间表示：UTC、秒精度、带 Z。
+def fmt_iso(dt: datetime) -> str:
+    """把 datetime 写成**定宽毫秒** UTC 串：``2026-11-22T13:07:09.042Z``。
 
-    秒精度是刻意的：``valid_until``/``created_at`` 之间要用字符串比较，
-    一旦混入微秒，字典序就不再等于时间序。
+    v0.3.0（W-2.4）从秒精度升到毫秒：同一秒内的两次写入，秒级时间戳相等，
+    ``ORDER BY updated_at`` 会退化成"随便排"，写入顺序不可复现（#30）。
+    定宽（永远 3 位毫秒）是为了让字符串字典序仍然等于时间序。
     """
-    dt = now or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime(_ISO_FMT)
+    dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+def now_iso(now: datetime | None = None) -> str:
+    """统一的时间表示：UTC、毫秒精度、带 Z。"""
+    return fmt_iso(now or datetime.now(timezone.utc))
 
 
 def parse_iso(s: str) -> datetime:
-    return datetime.strptime(s, _ISO_FMT).replace(tzinfo=timezone.utc)
+    """容错解析：既认新毫秒格式，也认旧秒级格式（存量数据不迁移也能读）。"""
+    text = str(s).strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        # 最后的兜底：老库可能只有秒级且没有 Z（手工写入的脏数据）
+        dt = datetime.strptime(str(s).strip(), _ISO_FMT)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def normalize_iso(s: str) -> str:
+    """把任意 ISO 时间规整成定宽毫秒格式（迁移用；语义不变，只统一写法）。"""
+    return fmt_iso(parse_iso(s))
 
 
 def as_iso(value: str | datetime | None, default_now: bool = True) -> str | None:

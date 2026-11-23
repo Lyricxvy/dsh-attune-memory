@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import const
-from .search import _exclusive, find_similar
+from .search import _exclusive, find_similar, key_values
 from .store import InvariantError, Store
-from .text import auto_keywords, join_keywords, normalize, split_keywords
+from .text import auto_keywords, join_keywords, normalize, segments, split_keywords
 from .util import now_iso, new_id, parse_iso
 
 #: 内容长度上下界（P3 §2.1：太短没有信息量，太长是聊天记录不是记忆）
@@ -26,7 +26,9 @@ INFERRED_CONFIDENCE_CAP = 0.7
 #: TOUCH 每次 +0.05，封顶 0.95（永远不给 1.0，1.0 意味着"不可错"）
 CONFIDENCE_STEP = 0.05
 CONFIDENCE_CAP = 0.95
-SUPERSEDE_AUTO_CONFIDENCE = 0.8   # 显式 + ≥0.8 才允许自动取代旧条目
+SUPERSEDE_AUTO_CONFIDENCE = 0.8
+#: 单次写入最多回看多少条同槽位记忆（W-2.3：槽位可以是几百条）
+SLOT_SCAN_LIMIT = 30   # 显式 + ≥0.8 才允许自动取代旧条目
 SUPERSEDE_KEEP_CONFIDENCE = 0.6   # 0.6–0.8：并存 + 标注冲突
 
 
@@ -61,6 +63,14 @@ class Candidate:
     user_id: str = "default"
     #: 调用方明确要取代的条目（memory_update/_supersede 传入）
     supersede_id: str | None = None
+    #: v0.3.0（W-3.2）时态四字段。temporal_kind 默认 current（"现在仍然成立"），
+    #: 说过去的事标 historical，一次性的标 event 并给 event_date，
+    #: 拿不准的标 uncertain（读路径会降权，但不假装它不存在）。
+    temporal_kind: str = "current"
+    #: 覆盖旧条时用的失效方式：superseded = 事实变了；corrected = 原来记错了。
+    invalidation: str | None = None
+    event_date: str | None = None
+    last_verified: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":
@@ -105,6 +115,25 @@ def validate(cand: Candidate) -> None:
     if cand.subtype not in const.SUBTYPES[cand.type]:
         raise CandidateError(
             f"{cand.type} 不支持 subtype：{cand.subtype}；合法值：{list(const.SUBTYPES[cand.type])}"
+        )
+    if cand.temporal_kind not in const.TEMPORAL_KINDS:
+        raise CandidateError(
+            f"非法 temporal_kind：{cand.temporal_kind}；合法值：{list(const.TEMPORAL_KINDS)}"
+        )
+    if cand.invalidation is not None and cand.invalidation not in const.INVALIDATIONS:
+        raise CandidateError(
+            f"非法 invalidation：{cand.invalidation}；合法值：{list(const.INVALIDATIONS)}"
+        )
+    for name in ("event_date", "last_verified"):
+        value = getattr(cand, name)
+        if value is not None:
+            try:
+                parse_iso(value)
+            except ValueError as exc:
+                raise CandidateError(f"{name} 不是合法的 ISO 时间：{value}；形如 2026-01-31T00:00:00Z") from exc
+    if cand.temporal_kind != "event" and cand.event_date is not None:
+        raise CandidateError(
+            f"event_date 只对 temporal_kind='event' 有意义（当前 temporal_kind={cand.temporal_kind}）"
         )
     if cand.subject_type not in const.SUBJECT_TYPES:
         raise CandidateError(
@@ -260,6 +289,52 @@ def _starts_like_task(raw: str) -> str | None:
     return None
 
 
+def intent_gate(cand: Candidate, *, store: Store | None = None) -> str | None:
+    """意图准入门（W-1.1）：返回"不该记"的理由；None 表示可以进价值闸门。
+
+    三组确定性规则，放在 :func:`value_gate` **之前**——它们判的不是"这句话好不好"，
+    而是"这类东西根本不该进长期记忆"：
+
+    1. **可从文件验证**：项目状态、仓库结构、配置项。这些下次读一遍文件就有，
+       记进库里只会过期成噪声（用户还会奇怪"它为什么记这个"）。
+    2. **运行时状态 / 一次性安排**：只在当前窗口成立、或者只发生一次的东西，
+       是 state 都不该是（它们没有"会持续一段时间"的语义），更不该是全局事实。
+    3. **否定极性**：状态动词的否定式（"不考"）意味着**状态变了**。如果照原样落库，
+       下次检索会把"不考数学一"当成"考数学一"的同义句召回——记反比不记更坏。
+       句子里已经给出"改成什么"（改考/改为/而是…）时放行，交给决策表做取代。
+
+    这三条对 ``explicit=True`` 同样生效：用户说"记住，我在这个窗口负责记忆分析"
+    依然不该进库——那不是偏好，是工位。
+    """
+    content = (cand.content or "").strip()
+    low = content.lower()
+
+    for pat in const.RUNTIME_MARKERS:
+        if pat in content:
+            return _discarded(
+                cand, f"运行时状态（命中「{pat}」）只在本会话成立，不该进长期事实层", store
+            )
+    for pat in const.FILE_VERIFIABLE_PATTERNS:
+        if pat.lower() in low:
+            return _discarded(
+                cand, f"可从文件/仓库直接查到（命中「{pat}」），不需要记成记忆", store
+            )
+    for pat in const.ONE_OFF_PATTERNS:
+        if pat in content:
+            return _discarded(cand, f"一次性安排（命中「{pat}」），不是跨时间的长期事实", store)
+
+    if not any(mark in content for mark in const.CORRECTION_MARKERS):
+        for verb in const.NEGATION_STATE_VERBS:
+            for neg in (f"不{verb}", f"取消{verb}", f"没有{verb}"):
+                if neg in content:
+                    return _discarded(
+                        cand,
+                        f"否定句式（「{neg}」）不记反向事实；请改成肯定表述（如「已改为…」）",
+                        store,
+                    )
+    return None
+
+
 def value_gate(cand: Candidate, *, store: Store | None = None) -> str | None:
     """Value Gate：返回 IGNORE 的理由；None 表示值得记。
 
@@ -325,6 +400,11 @@ def consider(store: Store, cand: Candidate, *, now: str | None = None) -> Decisi
         cand.metadata["type_hint"] = hint
         store.counter_bump("type_hint_suspected")
 
+    reason = intent_gate(cand, store=store)
+    if reason:
+        store.counter_bump("intent_rejected")
+        return Decision(action="ignore", reason=reason)
+
     reason = value_gate(cand, store=store)
     if reason:
         store.counter_bump("gate_rejected")
@@ -339,6 +419,9 @@ def consider(store: Store, cand: Candidate, *, now: str | None = None) -> Decisi
         subject_type=cand.subject_type, subject_name=cand.subject_name,
         type=cand.type, subtype=cand.subtype, domain_key=cand.domain_key,
         user_id=cand.user_id,
+        # W-2.3：槽位会随时间增长到几百条，而"这次要覆盖谁"只可能是最近写的那些。
+        # 不封顶的话每次写入都要对整个槽位跑一遍 _equivalent/_exclusive（O(n²)）。
+        limit=SLOT_SCAN_LIMIT,
     )
 
     # ① 显式取代（memory_supersede / memory_update 指定了 id）
@@ -355,6 +438,31 @@ def consider(store: Store, cand: Candidate, *, now: str | None = None) -> Decisi
                 action="touch",
                 reason=f"与已有记忆 {old['id']} 等价，只提升置信度",
                 memory=touched, related=related,
+            )
+
+    # ②.5 同槽位"换个说法" → 就地 UPDATE（W-4.3）。
+    # 不算新增（会留两条几乎一样的句子），也不算取代（事实没变，历史里不该多一条
+    # "已被取代"）。只改内容与关键词，置信度取两者较大者。
+    for old in slot:
+        if _wording_fix(cand.content, old):
+            with store.tx():
+                saved = store.update_fields(
+                    old["id"],
+                    {
+                        "content": cand.content.strip(),
+                        "keywords": join_keywords(cand.keywords or auto_keywords(cand.content)),
+                        "confidence": round(max(float(old.get("confidence") or 0), float(cand.confidence)), 3),
+                        "updated_at": now,
+                    },
+                    reason=f"措辞修正：{cand.content.strip()[:40]}",
+                    actor=_actor(cand),
+                    action="update",
+                )
+            _count_op(store, "update")
+            return Decision(
+                action="update",
+                reason=f"与 {old['id']} 是同一件事换个说法，就地改措辞",
+                memory=saved, related=related,
             )
 
     # ③ 同槽位互斥 → 按置信度分级处理（模块 5）。
@@ -414,6 +522,47 @@ def consider(store: Store, cand: Candidate, *, now: str | None = None) -> Decisi
     )
 
 
+def _lcs_ratio(a: str, b: str) -> float:
+    """最长公共子序列占较短串的比例（0–1）。用于判断"是不是同一句话换个说法"。"""
+    if not a or not b:
+        return 0.0
+    if a in b or b in a:
+        return 1.0
+    prev = [0] * (len(b) + 1)
+    for ch in a:
+        cur = [0]
+        for j, other in enumerate(b, 1):
+            cur.append(prev[j - 1] + 1 if ch == other else max(prev[j], cur[j - 1]))
+        prev = cur
+    return prev[-1] / min(len(a), len(b))
+
+
+def _wording_fix(content: str, old: dict) -> bool:
+    """同一件事换了个说法（W-4.3）：该就地改，而不是新增一条或取代旧条。
+
+    判据是**机械的**，三条同时成立才算：
+    1. 归一化后两个串的 LCS 占较短串 ≥ 0.92（"目前正在备考数学一" vs
+       "正在备考数学一"：只多了"目前"两个字；而"备考数学一" vs "备考英语一"
+       只到 0.86，不会被合并）；
+    2. 不是互斥（有极性对立，或同一属性两个取值 —— 那是事实变了）；
+    3. 关键值不冲突（key_values 抽出的同名属性取值必须相同）。
+    拿不准就返回 False，走"新增"——宁可多一条，也不要把两件事合成一条。
+    """
+    a, b = normalize(content), normalize(old.get("content") or "")
+    if not a or not b or a == b:
+        return False
+    if _exclusive({"content": content}, old):
+        return False
+    if _lcs_ratio(a, b) < 0.92:
+        return False
+    ka = key_values(content)
+    kb = key_values(old.get("content") or "")
+    for name in set(ka) & set(kb):
+        if ka[name] != kb[name]:
+            return False
+    return True
+
+
 def _equivalent(content: str, old: dict) -> bool:
     a, b = normalize(content), normalize(old.get("content") or "")
     if a == b:
@@ -451,6 +600,10 @@ def _new_row(cand: Candidate, now: str) -> dict:
         "metadata": cand.metadata or {},
         "inject_count": 0,
         "use_count": 0,
+        "temporal_kind": cand.temporal_kind,
+        "invalidation": cand.invalidation,
+        "event_date": cand.event_date,
+        "last_verified": cand.last_verified,
     }
 
 
@@ -497,10 +650,14 @@ def _commit_supersede(
         # 先插新行：memories.superseded_by 是指向 memories(id) 的外键，
         # 新行还不存在时给旧行写 superseded_by 会直接 FOREIGN KEY constraint failed。
         saved = store.insert(new_row, reason=reason, actor=_actor(cand))
+        invalidation = cand.invalidation or "superseded"
         store.update_fields(
             old_id,
             {
-                "status": "superseded",
+                # W-3.3：corrected = 原来记错了 → archived（任何视图都不召回）；
+                # superseded = 事实变了 → 仍是 superseded，as-of 查询可召回。
+                "status": "archived" if invalidation == "corrected" else "superseded",
+                "invalidation": invalidation,
                 "valid_until": now,
                 "superseded_by": saved["id"],
                 "updated_at": now,
@@ -549,22 +706,29 @@ def preview(store: Store, cand: Candidate, *, now: str | None = None) -> dict:
         subject_type=cand.subject_type, subject_name=cand.subject_name,
         type=cand.type, subtype=cand.subtype, domain_key=cand.domain_key,
         user_id=cand.user_id,
+        limit=SLOT_SCAN_LIMIT,
+    )
+    # 预览要报"槽位里一共几条 active"，不能拿回看窗口的大小冒充
+    slot_total = store.count_slot(
+        subject_type=cand.subject_type, subject_name=cand.subject_name,
+        type=cand.type, subtype=cand.subtype, domain_key=cand.domain_key,
+        user_id=cand.user_id,
     )
     duplicates = [r for r in related if r["relation"] == "equivalent"]
     conflicts = [r for r in related if r["relation"] == "exclusive"]
 
     if duplicates:
         return {"would": "touch", "reason": f"与 {duplicates[0]['memory']['id']} 等价，只会提升置信度",
-                "duplicates": duplicates, "conflicts": conflicts, "slot_active": len(slot)}
+                "duplicates": duplicates, "conflicts": conflicts, "slot_active": slot_total}
     if cand.supersede_id:
         return {"would": "supersede", "reason": "调用方显式指定取代",
-                "duplicates": [], "conflicts": conflicts, "slot_active": len(slot)}
+                "duplicates": [], "conflicts": conflicts, "slot_active": slot_total}
     if conflicts and cand.explicit and float(cand.confidence) >= SUPERSEDE_AUTO_CONFIDENCE:
         return {"would": "supersede",
                 "reason": f"与 {conflicts[0]['memory']['id']} 互斥且置信度足够，会自动取代",
-                "duplicates": [], "conflicts": conflicts, "slot_active": len(slot)}
+                "duplicates": [], "conflicts": conflicts, "slot_active": slot_total}
     return {"would": "add", "reason": "没有等价或可自动取代的条目",
-            "duplicates": [], "conflicts": conflicts, "slot_active": len(slot)}
+            "duplicates": [], "conflicts": conflicts, "slot_active": slot_total}
 
 
 def update(store: Store, memory_id: str, fields: dict, *, reason: str) -> dict:
@@ -573,7 +737,8 @@ def update(store: Store, memory_id: str, fields: dict, *, reason: str) -> dict:
     # 但 "identity" 写错成别的 profile 子类是常见笔误）；type 与 subject_type 不能改——
     # 那两类变了说明"这是另一条事实"，必须新增一条，否则历史会读成"同一条改了口径"。
     allowed = {"content", "keywords", "importance", "injection_policy", "confidence",
-               "subtype", "domain_key", "scope", "metadata", "subject_name", "valid_until"}
+               "subtype", "domain_key", "scope", "metadata", "subject_name", "valid_until",
+               "temporal_kind", "event_date", "last_verified"}
     bad = set(fields) - allowed
     if bad:
         raise CandidateError(
@@ -619,8 +784,32 @@ def update(store: Store, memory_id: str, fields: dict, *, reason: str) -> dict:
         # 面板/工具传进来可能是数组（["李四","考研"]），库里存的是空格分隔的字符串；
         # 不归一化会让 sqlite3 抛 "Error binding parameter: type 'list' is not supported"。
         payload["keywords"] = join_keywords(payload["keywords"])
+    # W-2.2：改完的整行必须仍然是一条合法记忆。不再单点校验，而是用同一套 validate
+    # 复核——否则 update 就成了"绕过写入口校验"的后门（#22）。
+    merged = {**old, **{k: v for k, v in payload.items() if k != "keywords"}}
+    merged["keywords"] = split_keywords(payload.get("keywords", old.get("keywords")))
+    merged["metadata"] = payload.get("metadata", old.get("metadata")) or {}
+    validate(Candidate(
+        content=merged["content"], type=merged["type"], subtype=merged["subtype"],
+        subject_type=merged["subject_type"], subject_name=merged.get("subject_name"),
+        domain_key=merged.get("domain_key"), scope=merged["scope"],
+        importance=merged["importance"], injection_policy=merged["injection_policy"],
+        confidence=float(merged["confidence"]), keywords=merged["keywords"],
+        explicit=True, valid_from=merged.get("valid_from"), valid_until=merged.get("valid_until"),
+        metadata=merged["metadata"], user_id=merged.get("user_id", "default"),
+    ))
     payload["updated_at"] = now_iso()
-    return store.update_fields(memory_id, payload, reason=reason, actor="tool", action="update")
+    with store.tx():
+        updated = store.update_fields(memory_id, payload, reason=reason, actor="tool", action="update")
+        # 生命周期（#22）：把 valid_until 改到过去，等于当场宣布这条失效。
+        # 只"写进去"却继续注入，是最危险的一种不一致（库里有状态、行为上没状态）。
+        if payload.get("valid_until") and payload["valid_until"] <= now_iso():
+            updated = store.set_status(
+                memory_id, "archived",
+                reason=f"有效期为 {payload['valid_until']}，已过（update 时触发归档）",
+                actor="tool", action="archive", extra={"updated_at": now_iso()},
+            )
+    return updated
 
 
 def merge(
@@ -671,6 +860,12 @@ def merge(
         metadata={"merged_from": ids},
         user_id=first["user_id"],
     )
+    # W-2.2：合并出来的新条也是一条新记忆，必须过和 add 同一套校验（#13/#35）。
+    # 以前这里直接 _insert，空内容/非法 importance 都能写进库。
+    validate(cand)
+    reject = value_gate(cand, store=None)
+    if reject:
+        raise CandidateError(f"合并后的内容没通过价值闸门：{reject}")
     with store.tx():
         saved = _insert(store, cand, now, reason=f"合并 {len(ids)} 条：{reason}")
         for r in rows:
@@ -703,7 +898,32 @@ def purge(store: Store, memory_id: str, *, reason: str) -> dict:
         raise InvariantError(
             f"{memory_id} 当前 status={row['status']}；物理删除前必须先 forget（status=deleted）"
         )
-    store.update_fields(memory_id, {}, reason=reason, actor="user", action="purge")
-    store.conn.execute("DELETE FROM memory_change WHERE memory_id=?", (memory_id,))
-    store.conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+    # 被 supersede 链指着的条目不能直接删：superseded_by 是外键，删了会留下断链。
+    refs = store.conn.execute(
+        "SELECT count(*) AS n FROM memories WHERE superseded_by=?", (memory_id,)
+    ).fetchone()["n"]
+    if refs:
+        raise InvariantError(
+            f"{memory_id} 仍被 {refs} 条历史记忆的 superseded_by 指向；"
+            "先处理这些历史条目（归档或改写），否则会把取代链删断"
+        )
+    # W-2.1：记 tombstone + 删主行必须在同一个事务里（#12）。
+    # 以前是"更新流水（自带事务）→ 裸删流水 → 裸删记忆"，中途崩溃会留下
+    # "流水没了、记忆还在"或者"记忆没了、流水还在"的不一致。
+    # 另外流水**不再删除**：那条 action=purge 的记录就是 tombstone，审计链必须留着（#36）。
+    with store.tx():
+        store._add_change(  # noqa: SLF001 - 同包内复用流水写入，避免再抄一份
+            memory_id=memory_id, action="purge", old=row, new=None, reason=reason,
+            actor="user", source_message_id=row.get("source_message_id"),
+        )
+        gone = [
+            r["gram"]
+            for r in store.conn.execute(
+                "SELECT gram FROM memory_gram WHERE memory_id=?", (memory_id,)
+            ).fetchall()
+        ]
+        if gone:
+            store.conn.execute("DELETE FROM memory_gram WHERE memory_id=?", (memory_id,))
+            store._df_dec(gone)
+        store.conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
     return row

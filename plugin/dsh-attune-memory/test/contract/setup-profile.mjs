@@ -16,7 +16,7 @@ import { join, resolve } from 'node:path'
 const HERE = resolve(import.meta.dirname, '..', '..')
 const WORKSPACE = resolve(HERE, '..', '..')
 const DSH_INSTALL = process.env.DSH_INSTALL ?? '<DSH_INSTALL>'
-const DSH_HOME = process.env.DSH_HOME ?? '<DSH_HOME>'
+const DSH_HOME = process.env.DSH_HOME ?? (() => { throw new Error('请先设置 DSH_HOME 环境变量') })()
 const PROFILE = process.env.CONTRACT_PROFILE ?? 'contract'
 const HOME = join(DSH_HOME, 'profiles', PROFILE)
 const BIN = join(DSH_INSTALL, 'resources', 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')

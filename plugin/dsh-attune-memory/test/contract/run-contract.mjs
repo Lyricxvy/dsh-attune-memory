@@ -18,7 +18,7 @@
  *   node test/contract/run-contract.mjs --quick      # 跳过压缩那一轮
  *   node test/contract/run-contract.mjs --keep       # 保留临时目录
  *
- * 依赖环境：DSH_INSTALL（默认 <DSH_INSTALL>）、DSH_HOME（默认 <DSH_HOME>）、
+ * 依赖环境：DSH_INSTALL、DSH_HOME（两者都必须由环境变量给出）、
  *          CONTRACT_PROFILE（默认 contract）。contract profile 必须已装好 dsh-attune-probe 与 dsh-attune-memory。
  */
 import { spawn } from 'node:child_process'
@@ -33,7 +33,7 @@ const HERE = resolve(import.meta.dirname, '..', '..') // plugin/dsh-attune-memor
 const WORKSPACE = resolve(HERE, '..', '..')
 
 const DSH_INSTALL = process.env.DSH_INSTALL ?? '<DSH_INSTALL>'
-const DSH_HOME = process.env.DSH_HOME ?? '<DSH_HOME>'
+const DSH_HOME = process.env.DSH_HOME ?? (() => { throw new Error('请先设置 DSH_HOME 环境变量') })()
 const PROFILE = process.env.CONTRACT_PROFILE ?? 'contract'
 const PYTHON = process.env.CONTRACT_PYTHON ?? 'python'
 

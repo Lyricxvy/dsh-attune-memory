@@ -26,7 +26,12 @@ _KEY_VALUE_PATTERNS = (
         r"(\d+(?:\.\d+)?)\s*(个|条|次|天|周|月|年|gb|mb|kb|毫秒|秒|分钟|小时|%|℃)", re.I
     ), 0),
     # 常见"同一属性"的口语写法：分数。属性名带上科目，避免"数学 120 分"和"英语 120 分"互相打架。
-    ("分数", re.compile(r"(数学|英语|政治|专业课|总分)\s*(?:考了?|得了?|是|有)?\s*(\d{2,3})\s*分"), 2),
+    # 属性与数之间允许插入常见副词（"数学目前考了 130 分"），否则同一属性的两次
+    # 表述会被当成"没有关键值"，冲突检测直接漏掉。
+    ("分数", re.compile(
+        r"(数学|英语|政治|专业课|总分)\s*(?:目前|现在|这次|已经|大概|大约)?\s*"
+        r"(?:考了?|得了?|是|有)?\s*(\d{2,3})\s*分"
+    ), 2),
     # 中文数字 + 单位（"三小时""两天"）：中文里数字经常不写成阿拉伯数字。
     ("数值", re.compile(r"([一二三四五六七八九十两半]+)\s*(个|条|次|天|周|月|年|小时|分钟|小时)"), 0),
 )
@@ -98,8 +103,12 @@ def relevance(query_terms_a: list[str], query_terms_b: list[str], memory: dict) 
     kws = set(split_keywords(memory.get("keywords")))
     content = normalize(memory.get("content") or "")
     for t in query_terms_a:
-        raw += len(t)
-        hits.append(t)
+        # 词表路必须逐条校验：match_vocabulary 给的是**全库**出现过的查询词，
+        # 不校验就变成"每条记忆都 +同样长度的分"，relevance 与记忆内容无关，
+        # 排序退化成 updated_at。外部基准（LoCoMo/LongMemEval）第一条就抓到它。
+        if t in kws:
+            raw += len(t)
+            hits.append(t)
     for t in query_terms_b:
         if t in kws:
             continue  # 已被词表路计过
@@ -158,6 +167,10 @@ def _drop(dropped: list[dict] | None, memory: dict, why: str) -> None:
         dropped.append({"id": memory["id"], "why": why})
 
 
+#: 有查询词时，除倒排命中外还补多少条"最近写入"作兜底（领域约定用）。
+RECENT_FILL = 50
+
+
 def build_candidates(
     store: Store,
     *,
@@ -172,15 +185,58 @@ def build_candidates(
     task_key: str | None = None,
     dropped: list[dict] | None = None,
     now: str | None = None,
+    asof: str | None = None,
+    terms: Iterable[str] | None = None,
 ) -> list[dict]:
-    """阶段①：结构化过滤。走索引，再用 Python 处理前缀匹配与 scope。"""
+    """阶段①：结构化过滤。走索引，再用 Python 处理前缀匹配与 scope。
+
+    ``asof`` 非空时切到"当时的视图"（W-3.6 as-of 查询）：不再只看 active，
+    而是取 ``valid_from <= asof < valid_until`` 的全部状态（corrected 除外）。
+    """
     now = now or now_iso()
-    statuses: tuple[str, ...] = ("active", "superseded") if include_superseded else ("active",)
-    rows = store.query(user_id=user_id, status=statuses, type=type, order="updated_at DESC")
+    if asof is not None:
+        statuses = ("active", "superseded", "archived")
+    else:
+        statuses = ("active", "superseded") if include_superseded else ("active",)
+    # W-2.3（#38）：有查询词就先走倒排——按时间取最近 200 条在万级库里等于随机丢弃
+    # 相关记忆（本地复现：501 条时 "What degree did I graduate with?" 命中 0）。
+    rows: list[dict] = []
+    if terms:
+        rows = store.candidates_by_terms(
+            terms, user_id=user_id, limit=const.MAX_CANDIDATES, statuses=statuses,
+        )
+        if not rows and dropped is not None:
+            # 只记一句"为什么走了兜底"，没有具体记忆可归因
+            dropped.append({"id": None, "why": "倒排里没有查询词命中的记忆，退回按时间取候选"})
+    seen_ids = {m["id"] for m in rows}
+    # 补一小段"最近写入"：领域约定/always 这类没有词面重合的记忆仍需在场，
+    # 但名额有限（RECENT_FILL），不让它挤掉索引命中的相关记忆。
+    if len(rows) < const.MAX_CANDIDATES:
+        recent = store.query(
+            user_id=user_id, status=statuses, type=type,
+            order="updated_at DESC", limit=RECENT_FILL,
+        )
+        for m in recent:
+            if m["id"] not in seen_ids:
+                rows.append(m)
+                seen_ids.add(m["id"])
     pol = set(policies) if policies else None
     sub = set(subtypes) if subtypes else None
     out: list[dict] = []
     for m in rows:
+        # W-3.4：corrected = 原来记错了，任何视图都不该再召回（连 as-of 也不行——
+        # 当时那条本身就是错的）。superseded 不同，它曾是事实，as-of 可召回。
+        if m.get("invalidation") == "corrected":
+            _drop(dropped, m, "已被纠正（原记录本身就是错的）")
+            continue
+        if asof is not None:
+            if (m.get("valid_from") or "") > asof:
+                _drop(dropped, m, f"在 {asof} 时还不存在")
+                continue
+            until = m.get("valid_until")
+            if until is not None and until <= asof:
+                _drop(dropped, m, f"在 {asof} 时已经失效")
+                continue
         if m["status"] == "active" and not include_expired and is_expired(m, now):
             _drop(dropped, m, "已过期")
             continue
@@ -308,8 +364,13 @@ def search(
     include_never: bool = False,
     task_key: str | None = None,
     now: str | None = None,
-    count_use: bool = True,
+    #: W-5.3（#24）：默认**不写库**。读路径写 use_count 会带来三个问题：
+    #: ①一次检索要为每条命中做一次 UPDATE，读放大成写；②同一条记忆被反复检索
+    #: 就自我强化（正反馈），打分逐渐失真；③只读的检索在只读介质/并发下会失败。
+    #: 想记"这条真被用上了"就显式传 True（例如 memory_probe 或人工标注）。
+    count_use: bool = False,
     debug: dict | None = None,
+    asof: str | None = None,
 ) -> list[dict]:
     """返回 ``[{memory, score, factors, matched_terms, note}]``，按分降序。
 
@@ -319,11 +380,12 @@ def search(
     now = now or now_iso()
     limit = max(1, min(int(limit), const.K_HARD_MAX))
     dropped = debug.setdefault("dropped", []) if debug is not None else None
+    terms_b = segments(query) if query else []
     cands = build_candidates(
         store, user_id=user_id, domain=domain, type=type, subtypes=subtypes,
         policies=policies, include_expired=include_expired,
         include_superseded=include_superseded, include_never=include_never,
-        task_key=task_key, now=now, dropped=dropped,
+        task_key=task_key, now=now, dropped=dropped, asof=asof, terms=terms_b,
     )
     if debug is not None:
         debug["candidates"] = len(cands)
@@ -338,7 +400,6 @@ def search(
     vocab = list(dict.fromkeys(vocab))
 
     terms_a = match_vocabulary(query, vocab) if query else []
-    terms_b = segments(query) if query else []
 
     # 同槽位分组，用于冲突惩罚
     slots: dict[tuple, list[dict]] = {}
@@ -380,12 +441,15 @@ def find_similar(
     if type and subtype:
         slot = store.same_slot(
             subject_type=subject_type, subject_name=subject_name, type=type,
-            subtype=subtype, domain_key=domain_key, user_id=user_id,
+            subtype=subtype, domain_key=domain_key, user_id=user_id, limit=limit,
         )
-        for m in slot:
-            result.append(
-                {"memory": m, "relation": _relation(content, m), "reason": _relation_reason(content, m)}
-            )
+        # W-2.3：同槽位条目会随库增长到几百条，逐条算 relation 是另一条 O(n²) 路径
+        # （每次写入 × 槽位大小）。只比较最近的 limit 条：等价/互斥判定看的是
+        # "最近写过的同类事实"，越老的越不可能是本次要覆盖的目标。
+        slot.sort(key=lambda m: (m.get("updated_at") or "", m["id"]), reverse=True)
+        for m in slot[:limit]:
+            rel = _relation(content, m)
+            result.append({"memory": m, "relation": rel, "reason": _RELATION_REASON[rel]})
 
     terms = [t for t in segments(content) if len(t) >= 2][:8]
     kws = [t for t in (split_keywords(content) or []) if len(t) >= 2][:8]
@@ -394,7 +458,8 @@ def find_similar(
     for m in near:
         if m["id"] in seen:
             continue
-        result.append({"memory": m, "relation": _relation(content, m), "reason": _relation_reason(content, m)})
+        rel = _relation(content, m)
+        result.append({"memory": m, "relation": rel, "reason": _RELATION_REASON[rel]})
 
     # 等价 > 互斥 > 互补 > 无关
     order = {"equivalent": 0, "exclusive": 1, "complementary": 2, "unrelated": 3}
@@ -419,11 +484,16 @@ def _relation(content: str, memory: dict) -> str:
     return "complementary" if overlap >= 1 else "unrelated"
 
 
+#: relation → 人话理由。查表而不是重算：``_relation`` 里有分词与归一化，
+#: 每次写入对每个候选重算两遍纯粹是浪费（profile 显示它占了 find_similar 的 55%）。
+_RELATION_REASON = {
+    "equivalent": "视为同一条事实（归一化后相同或关键词高度重合）",
+    "exclusive": "同槽位且互斥（极性词或关键值冲突）",
+    "complementary": "同槽位且内容有交集，可考虑合并",
+    "unrelated": "仅关键词邻近，不构成同一事实",
+}
+
+
 def _relation_reason(content: str, memory: dict) -> str:
-    rel = _relation(content, memory)
-    return {
-        "equivalent": "视为同一条事实（归一化后相同或关键词高度重合）",
-        "exclusive": "同槽位且互斥（极性词或关键值冲突）",
-        "complementary": "同槽位且内容有交集，可考虑合并",
-        "unrelated": "仅关键词邻近，不构成同一事实",
-    }[rel]
+    """兼容入口：给 relation 补一句人话（内部查表，不重算）。"""
+    return _RELATION_REASON[_relation(content, memory)]

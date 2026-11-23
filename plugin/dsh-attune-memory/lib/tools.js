@@ -137,16 +137,35 @@ export function buildTools(engine, hooks = {}) {
             + '省略/false=你的推测或归纳（会被压到 0.7、不能设 always、不会自动取代任何东西）。'
             + '用户明说的事请标 true；自己归纳的不要标。',
         },
+        temporal_kind: {
+          type: 'string',
+          enum: ['current', 'historical', 'event', 'uncertain'],
+          description: '这句话说的是什么时候的事：current=现在仍然成立（默认）；historical=过去的事实；'
+            + 'event=一次性事件（配合 event_date）；uncertain=你说不准。',
+        },
+        event_date: { type: 'string', description: "temporal_kind=event 时的事件时间，ISO 形如 2026-03-01T00:00:00Z。" },
         source_message_id: { type: 'string', description: '这句话来自哪条用户消息（如果能拿到）。' },
+        task_key: {
+          type: 'string',
+          description: 'scope=task 时的任务键（不传就用当前会话）。任务级状态只在这个任务里可见。',
+        },
       },
     },
     output: OUTPUT,
     async execute(args) {
       try {
         const payload = { ...args }
+        const taskKey = typeof payload.task_key === 'string' && payload.task_key ? payload.task_key : hooks.taskKey?.()
+        delete payload.task_key
         if (!payload.domain_key && args.type === 'domain') {
           const guessed = hooks.domainFor?.(String(args.content ?? ''))
           if (guessed) payload.domain_key = guessed
+        }
+        if (payload.scope === 'task') {
+          // 引擎不变式要求 task_key 必填；插件在这里补上"当前会话"这个默认键，
+          // 免得模型每次写任务状态都得自己编一个键。
+          if (!taskKey) throw new Error('scope=task 需要 task_key，而当前会话无法确定（没有活跃会话）')
+          payload.metadata = { ...(payload.metadata ?? {}), task_key: taskKey }
         }
         const decision = await engine.call('add', payload)
         afterWrite()

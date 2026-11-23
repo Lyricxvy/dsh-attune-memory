@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "5"
 
 DDL_MEMORIES = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -35,7 +35,13 @@ CREATE TABLE IF NOT EXISTS memories (
     updated_at             TEXT NOT NULL,
     metadata               TEXT NOT NULL DEFAULT '{}',
     inject_count           INTEGER NOT NULL DEFAULT 0,
-    use_count              INTEGER NOT NULL DEFAULT 0
+    use_count              INTEGER NOT NULL DEFAULT 0,
+    -- v0.3.0（W-3.1）时态四字段：都是带默认值的可空列，旧库 ALTER 即可补上。
+    temporal_kind          TEXT NOT NULL DEFAULT 'current'
+                           CHECK (temporal_kind IN ('current','historical','event','uncertain')),
+    invalidation           TEXT CHECK (invalidation IS NULL OR invalidation IN ('corrected','superseded')),
+    event_date             TEXT,
+    last_verified          TEXT
 )
 """
 
@@ -87,6 +93,22 @@ CREATE TABLE IF NOT EXISTS memory_request (
     created_at TEXT NOT NULL
 )"""
 
+DDL_GRAM = """
+CREATE TABLE IF NOT EXISTS memory_gram (
+    gram      TEXT NOT NULL,
+    memory_id TEXT NOT NULL,
+    user_id   TEXT NOT NULL,
+    PRIMARY KEY (gram, memory_id)
+)"""
+
+
+DDL_GRAM_DF = """
+CREATE TABLE IF NOT EXISTS memory_gram_df (
+    gram TEXT PRIMARY KEY,
+    df   INTEGER NOT NULL DEFAULT 0
+)"""
+
+
 DDL_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_mem_policy ON memories(user_id, injection_policy, status)",
     "CREATE INDEX IF NOT EXISTS idx_mem_type_domain ON memories(user_id, type, domain_key, status)",
@@ -98,7 +120,34 @@ DDL_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_change_mid ON memory_change(memory_id, at)",
     "CREATE INDEX IF NOT EXISTS idx_obs_kind ON memory_observation(kind, at)",
     "CREATE INDEX IF NOT EXISTS idx_req_created ON memory_request(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_gram_mem ON memory_gram(memory_id)",
+    # W-2.3：写入决策按"同槽位最近 N 条"取数；没有这条索引，SQLite 会对整个槽位
+    # 做一遍排序（槽位可以上千条），写入就仍然是 O(n log n)。
+    "CREATE INDEX IF NOT EXISTS idx_mem_slot ON memories(user_id, subject_type, subject_name,"
+    " type, subtype, domain_key, status, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_event ON memories(temporal_kind, event_date)",
 )
+
+
+# v0.3.0（W-3.1）：老库（schema 4.x）需要补的列。SQLite 没有 ADD COLUMN IF NOT EXISTS，
+# 所以先看 PRAGMA table_info 再 ADD，保证幂等（可以反复跑）。
+COLUMN_MIGRATIONS: dict[str, str] = {
+    "temporal_kind": "ALTER TABLE memories ADD COLUMN temporal_kind TEXT NOT NULL DEFAULT 'current'",
+    "invalidation": "ALTER TABLE memories ADD COLUMN invalidation TEXT",
+    "event_date": "ALTER TABLE memories ADD COLUMN event_date TEXT",
+    "last_verified": "ALTER TABLE memories ADD COLUMN last_verified TEXT",
+}
+
+
+def ensure_columns(conn: sqlite3.Connection) -> list[str]:
+    """补齐缺失列，返回这次补了哪些（幂等）。"""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
+    added: list[str] = []
+    for name, sql in COLUMN_MIGRATIONS.items():
+        if name not in have:
+            conn.execute(sql)
+            added.append(name)
+    return added
 
 
 def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
@@ -114,7 +163,11 @@ def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """幂等建表 + 建索引 + 写 schema_version。"""
+    """幂等建表 + 补列 + 建索引 + 写 schema_version。
+
+    顺序很重要：老库先 CREATE TABLE IF NOT EXISTS（无副作用），再 ensure_columns
+    把新列补上，最后才建索引——idx_event 依赖 temporal_kind/event_date。
+    """
     conn.executescript(
         "BEGIN IMMEDIATE;\n"
         + DDL_MEMORIES
@@ -129,11 +182,45 @@ def init_schema(conn: sqlite3.Connection) -> None:
         + ";\n"
         + DDL_REQUEST
         + ";\n"
+        + DDL_GRAM
+        + ";\n"
+        + DDL_GRAM_DF
+        + ";\n"
+        + "COMMIT;"
+    )
+    ensure_columns(conn)
+    conn.executescript(
+        "BEGIN IMMEDIATE;\n"
         + ";\n".join(DDL_INDEXES)
         + ";\n"
         + f"INSERT OR REPLACE INTO memory_meta(k, v) VALUES ('schema_version', '{SCHEMA_VERSION}');\n"
         + "COMMIT;"
     )
+
+
+def migrate_data(conn: sqlite3.Connection) -> dict[str, int]:
+    """W-3.5：补列 + 回填时态字段（幂等）。
+
+    回填口径是**保守**的：旧库里 status=superseded 的条目一律标 invalidation='superseded'。
+    旧数据里无法区分"当时记错了"与"后来事实变了"，把它们标 corrected 会让 as-of 查询
+    凭空少掉一段真实历史；标 superseded 至少还留在时间轴里可查。
+    """
+    added = ensure_columns(conn)
+    cur = conn.execute(
+        "UPDATE memories SET temporal_kind='current'"
+        " WHERE temporal_kind IS NULL OR temporal_kind=''"
+    )
+    filled_kind = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    cur = conn.execute(
+        "UPDATE memories SET invalidation='superseded'"
+        " WHERE status='superseded' AND invalidation IS NULL"
+    )
+    filled_invalidation = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    return {
+        "added_columns": len(added),
+        "filled_temporal_kind": filled_kind,
+        "filled_invalidation": filled_invalidation,
+    }
 
 
 def table_names(conn: sqlite3.Connection) -> list[str]:

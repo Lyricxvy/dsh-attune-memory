@@ -253,9 +253,16 @@ export class Recall {
     }
 
     const domain = guessDomain(query)
+    // W-1.3：task 作用域的记忆只在本任务里可见。插件把"会话"当任务键传下去，
+    // 这样写进 task 层的运行时状态不会漏到别的会话（引擎侧还会再校验一次）。
+    const taskKey = sessionId ? `session:${sessionId}` : undefined
     let res
     try {
-      res = await this.#engine.call('read_for_context', domain ? { query, domain } : { query })
+      res = await this.#engine.call('read_for_context', {
+        query,
+        ...(domain ? { domain } : {}),
+        ...(taskKey ? { task_key: taskKey } : {}),
+      })
     } catch (error) {
       this.#lastError = error
       this.#log?.warn?.(`dsh-attune-memory: 检索失败（fail-open，本轮不注入）：${error?.message ?? error}`)

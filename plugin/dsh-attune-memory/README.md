@@ -25,7 +25,7 @@
 | `lib/ui.js` | 单文件管理页（无构建步骤） |
 | `lib/index.js` | 组合：配置解析、三通道接线、工具注册、会话事件、生命周期清理 |
 | `cordis.patch.yml` | bundle 补丁：`insert: [{id: dsh-attune-memory, name: dsh-attune-memory, config: {engineDir}}]` |
-| `test/recall.test.mjs` | 去重/重发回归测试（8 组断言，`node test/recall.test.mjs`） |
+| `test/` | 10 个测试文件，直接 `node test/<名字>.test.mjs`：注入去重、RPC 客户端、确定性抽取、抽取落库与四计数、面板渲染、路由契约、路由桩、工具层 schema、端到端穿透（覆盖全部 27 个操作）、布局防复发闸 |
 
 ## 配置
 
